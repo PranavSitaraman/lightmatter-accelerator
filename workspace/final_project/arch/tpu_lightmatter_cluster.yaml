@@ -1,0 +1,86 @@
+{% set NODES_X = NODES_X | default(4) %}
+{% set NODES_Y = NODES_Y | default(4) %}
+{% set PE_X = PE_X | default(64) %}
+{% set PE_Y = PE_Y | default(64) %}
+{% set HBM_GIB = HBM_GIB | default(8) %}
+{% set UB_MIB = UB_MIB | default(128) %}
+{% set COMM_PATTERN = COMM_PATTERN | default("node_to_node") %}
+{% set LOGICAL_READ_ENERGY = LOGICAL_READ_ENERGY | default(7.03e-12) %}
+{% set LOGICAL_WRITE_ENERGY = LOGICAL_WRITE_ENERGY | default(7.03e-12) %}
+{% set LOGICAL_READ_LATENCY = LOGICAL_READ_LATENCY | default(1 / (8 * 1200e9)) %}
+{% set LOGICAL_WRITE_LATENCY = LOGICAL_WRITE_LATENCY | default(1 / (8 * 1200e9)) %}
+
+{% if COMM_PATTERN == "node_to_node" %}
+{% set LOGICAL_KEEP = "input | output" %}
+{% set HBM_KEEP = "weight" %}
+{% elif COMM_PATTERN in ("node_to_dram", "shared_dram_multicast") %}
+{% set LOGICAL_KEEP = "weight" %}
+{% set HBM_KEEP = "input | output" %}
+{% else %}
+{% set LOGICAL_KEEP = "input | output | weight" %}
+{% set HBM_KEEP = "Nothing" %}
+{% endif %}
+
+arch:
+  nodes:
+  - !Memory
+    name: LogicalClusterMemory
+    size: {{ NODES_X * NODES_Y * HBM_GIB * 1024 * 1024 * 1024 * 8 }}
+    area: 0
+    leak_power: 0
+    total_latency: max(read_latency, write_latency)
+    tensors: {keep: {{ LOGICAL_KEEP }}}
+    actions:
+    - {name: read, energy: {{ LOGICAL_READ_ENERGY }}, latency: {{ LOGICAL_READ_LATENCY }}}
+    - {name: write, energy: {{ LOGICAL_WRITE_ENERGY }}, latency: {{ LOGICAL_WRITE_LATENCY }}}
+
+  - !Container
+    name: NodeArray
+    spatial:
+    - {name: NodeX, fanout: {{ NODES_X }}, min_usage: 1}
+    - {name: NodeY, fanout: {{ NODES_Y }}, min_usage: 1}
+
+  - !Memory
+    name: HBM
+    size: {{ HBM_GIB * 1024 * 1024 * 1024 * 8 }}
+    area: 0
+    leak_power: 0
+    total_latency: max(read_latency, write_latency)
+    tensors: {keep: {{ HBM_KEEP }}}
+    actions:
+    - {name: read, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+    - {name: write, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+
+  - !Memory
+    name: UnifiedBuffer
+    size: {{ UB_MIB * 1024 * 1024 * 8 }}
+    area: 112e-6
+    leak_power: 0
+    total_latency: max(read_latency, write_latency)
+    tensors: {keep: All}
+    actions:
+    - {name: read, energy: 1.88e-12, latency: 1 / (8 * 2048e9)}
+    - {name: write, energy: 2.36e-12, latency: 1 / (8 * 1024e9)}
+
+  - !Container
+    name: ProcessingElement
+    spatial:
+    - {name: reuse_input, fanout: {{ PE_X }}, may_reuse: input, reuse: input, min_usage: 1}
+    - {name: reuse_output, fanout: {{ PE_Y }}, may_reuse: output, reuse: output, min_usage: 1}
+
+  - !Memory
+    name: Register
+    size: weight.bits_per_value if weight else 0
+    area: 1e-11
+    leak_power: 0
+    tensors: {keep: weight}
+    actions:
+    - {name: read, energy: 0, latency: 0}
+    - {name: write, energy: 0, latency: 0}
+
+  - !Compute
+    name: MAC
+    area: 9e-11
+    leak_power: 0
+    actions:
+    - {name: compute, energy: 0.084e-12, latency: 1 / 1.05e9}
