@@ -1,0 +1,108 @@
+##############################################################################
+# Electrical Mesh Baseline — distance-dependent hop cost
+#
+# Models a traditional electrical interconnect (e.g., TPU v5p ICI) where
+# energy and latency scale with the number of hops (Manhattan distance
+# in the mesh/torus). AccelForge's !Network component handles this
+# natively: it multiplies the hops action cost by the spatial distance.
+#
+# Supports both 2D (NODES_Z=1) and 3D topologies via Jinja variables.
+#
+# Electrical assumptions:
+#   - 10 pJ/bit per hop (modeling assumption for high-speed SerDes)
+#   - 5 ns router latency per hop
+#   - No native multicast (each unicast pays full hop cost)
+##############################################################################
+
+{% set NODES_X = NODES_X | default(4) %}
+{% set NODES_Y = NODES_Y | default(4) %}
+{% set NODES_Z = NODES_Z | default(1) %}
+{% set PE_X = PE_X | default(64) %}
+{% set PE_Y = PE_Y | default(64) %}
+{% set HBM_GIB = HBM_GIB | default(8) %}
+{% set UB_MIB = UB_MIB | default(128) %}
+
+# Electrical mesh: energy and latency scale with hop count
+{% set ELEC_ENERGY_PER_HOP = ELEC_ENERGY_PER_HOP | default(10e-12) %}
+{% set ELEC_LATENCY_PER_HOP = ELEC_LATENCY_PER_HOP | default(5e-9) %}
+
+arch:
+  nodes:
+  # ── Level 0: Shared off-chip memory (pooled across all nodes) ──────────
+  - !Memory
+    name: MainMemory
+    size: {{ NODES_X * NODES_Y * NODES_Z * HBM_GIB * 1024 * 1024 * 1024 * 8 }}
+    area: 0
+    leak_power: 0
+    total_latency: max(read_latency, write_latency)
+    tensors: {keep: All}
+    actions:
+    - {name: read, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+    - {name: write, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+
+  # ── Level 1: Electrical mesh — per-hop cost ────────────────────────────
+  # AccelForge computes hop count from the spatial distance between
+  # source and destination in the array. Energy and latency multiply
+  # by that hop count, correctly penalizing far-apart nodes.
+  - !Network
+    name: ElectricalMesh
+    area: 0
+    leak_power: 0
+    actions:
+    - {name: hops, energy: {{ ELEC_ENERGY_PER_HOP }}, latency: {{ ELEC_LATENCY_PER_HOP }}}
+
+  # ── Level 2: Per-node HBM (distributed across mesh) ───────────────────
+  - !Memory
+    name: HBM
+    size: {{ HBM_GIB * 1024 * 1024 * 1024 * 8 }}
+    area: 0
+    leak_power: 0
+    total_latency: max(read_latency, write_latency)
+    tensors: {keep: ~MainMemory, may_keep: All}
+    actions:
+    - {name: read, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+    - {name: write, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+    spatial:
+    - {name: X, fanout: {{ NODES_X }}}
+    - {name: Y, fanout: {{ NODES_Y }}}
+{% if NODES_Z > 1 %}
+    - {name: Z, fanout: {{ NODES_Z }}}
+{% endif %}
+
+  # ── Level 3: Per-node unified buffer ───────────────────────────────────
+  - !Memory
+    name: UnifiedBuffer
+    size: {{ UB_MIB * 1024 * 1024 * 8 }}
+    area: 112e-6
+    leak_power: 0
+    total_latency: max(read_latency, write_latency)
+    tensors: {keep: All}
+    actions:
+    - {name: read, energy: 1.88e-12, latency: 1 / (8 * 2048e9)}
+    - {name: write, energy: 2.36e-12, latency: 1 / (8 * 1024e9)}
+
+  # ── Level 4: PE array with input/output reuse trees ────────────────────
+  - !Container
+    name: ProcessingElement
+    spatial:
+    - {name: reuse_input, fanout: {{ PE_X }}, may_reuse: input, reuse: input, min_usage: 1}
+    - {name: reuse_output, fanout: {{ PE_Y }}, may_reuse: output, reuse: output, min_usage: 1}
+
+  # ── Level 5: Weight register ───────────────────────────────────────────
+  - !Memory
+    name: Register
+    size: weight.bits_per_value if weight else 0
+    area: 1e-11
+    leak_power: 0
+    tensors: {keep: weight}
+    actions:
+    - {name: read, energy: 0, latency: 0}
+    - {name: write, energy: 0, latency: 0}
+
+  # ── Level 6: MAC unit ──────────────────────────────────────────────────
+  - !Compute
+    name: MAC
+    area: 9e-11
+    leak_power: 0
+    actions:
+    - {name: compute, energy: 0.084e-12, latency: 1 / 1.05e9}

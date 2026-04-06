@@ -1,0 +1,110 @@
+##############################################################################
+# Passage EVK100 Optical Interconnect — 4×4×4 Cube (64 nodes)
+#
+# Based on AccelForge's networked/rack.yaml pattern, using the native
+# !Network component to model Lightmatter Passage EVK100.
+#
+# Passage EVK100 specs (ISES Korea 2025):
+#   - 3.2 Tbps per fiber (16-lambda, 112G PAM4)
+#   - 1.9 pJ/bit total wall-plug energy
+#   - Monolithic PIC: MRM modulators, TIAs, Tx drivers
+#
+# Per-node specs modeled after TPU v5p:
+#   - 95 GiB HBM per chip
+#   - 128 MiB unified buffer
+#   - 64×64 PE array with weight-stationary dataflow
+#   - MAC at 1.05 GHz, 0.084 pJ/op
+#
+# Topology: 4×4×4 cube = 64 nodes, connected via Passage optical fabric.
+##############################################################################
+
+{% set NODES_X = NODES_X | default(4) %}
+{% set NODES_Y = NODES_Y | default(4) %}
+{% set NODES_Z = NODES_Z | default(4) %}
+{% set PE_X = PE_X | default(64) %}
+{% set PE_Y = PE_Y | default(64) %}
+{% set HBM_GIB = HBM_GIB | default(95) %}
+{% set UB_MIB = UB_MIB | default(128) %}
+
+# Passage EVK100 specs
+{% set PASSAGE_ENERGY_PJ_PER_BIT = PASSAGE_ENERGY_PJ_PER_BIT | default(1.9e-12) %}
+{% set PASSAGE_LATENCY_PER_HOP_S = PASSAGE_LATENCY_PER_HOP_S | default(1.5e-9) %}
+
+arch:
+  nodes:
+  # ── Level 0: Shared off-chip memory (pooled across all nodes) ──────────
+  - !Memory
+    name: MainMemory
+    size: {{ NODES_X * NODES_Y * NODES_Z * HBM_GIB * 1024 * 1024 * 1024 * 8 }}
+    area: 0
+    leak_power: 0
+    total_latency: max(read_latency, write_latency)
+    tensors: {keep: All}
+    actions:
+    - {name: read, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+    - {name: write, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+
+  # ── Level 1: Passage EVK100 optical interconnect ───────────────────────
+  # AccelForge !Network component: the "hops" action models per-hop
+  # energy and latency for data moving between MainMemory and per-node HBM.
+  # For an optical crossbar, effective hop count approaches 1 for any pair.
+  - !Network
+    name: PassageEVK100
+    area: 0
+    leak_power: 0
+    actions:
+    - {name: hops, energy: {{ PASSAGE_ENERGY_PJ_PER_BIT }}, latency: {{ PASSAGE_LATENCY_PER_HOP_S }}}
+
+  # ── Level 2: Per-node HBM (distributed across 4×4×4 cube) ─────────────
+  - !Memory
+    name: HBM
+    size: {{ HBM_GIB * 1024 * 1024 * 1024 * 8 }}
+    area: 0
+    leak_power: 0
+    total_latency: max(read_latency, write_latency)
+    tensors: {keep: ~MainMemory, may_keep: All}
+    actions:
+    - {name: read, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+    - {name: write, energy: 7.03e-12, latency: 1 / (8 * 1200e9)}
+    spatial:
+    - {name: X, fanout: {{ NODES_X }}}
+    - {name: Y, fanout: {{ NODES_Y }}}
+    - {name: Z, fanout: {{ NODES_Z }}}
+
+  # ── Level 3: Per-node unified buffer ───────────────────────────────────
+  - !Memory
+    name: UnifiedBuffer
+    size: {{ UB_MIB * 1024 * 1024 * 8 }}
+    area: 112e-6
+    leak_power: 0
+    total_latency: max(read_latency, write_latency)
+    tensors: {keep: All}
+    actions:
+    - {name: read, energy: 1.88e-12, latency: 1 / (8 * 2048e9)}
+    - {name: write, energy: 2.36e-12, latency: 1 / (8 * 1024e9)}
+
+  # ── Level 4: PE array with input/output reuse trees ────────────────────
+  - !Container
+    name: ProcessingElement
+    spatial:
+    - {name: reuse_input, fanout: {{ PE_X }}, may_reuse: input, reuse: input, min_usage: 1}
+    - {name: reuse_output, fanout: {{ PE_Y }}, may_reuse: output, reuse: output, min_usage: 1}
+
+  # ── Level 5: Weight register ───────────────────────────────────────────
+  - !Memory
+    name: Register
+    size: weight.bits_per_value if weight else 0
+    area: 1e-11
+    leak_power: 0
+    tensors: {keep: weight}
+    actions:
+    - {name: read, energy: 0, latency: 0}
+    - {name: write, energy: 0, latency: 0}
+
+  # ── Level 6: MAC unit ──────────────────────────────────────────────────
+  - !Compute
+    name: MAC
+    area: 9e-11
+    leak_power: 0
+    actions:
+    - {name: compute, energy: 0.084e-12, latency: 1 / 1.05e9}
