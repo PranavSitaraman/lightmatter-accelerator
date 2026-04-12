@@ -10,12 +10,13 @@ AccelForge's iterative hardware mapper.
 
 | File | Description |
 |---|---|
-| `4_lightmatter_interconnects.ipynb` | **Main executed notebook** — all 3 milestones + TPU cube ICI study + sensitivity analysis. 55 cells, fully executed, 0 errors. |
-| `scripts/lightmatter_interconnects.py` | Core study engine: topology models, iterative solver, technology catalog, sweep functions, CLI. |
+| `4_lightmatter_interconnects.ipynb` | **Main executed notebook** — all 3 milestones + TPU cube ICI study + mapping-choice analysis + sensitivity analysis. 60 cells, fully executed, 0 errors. |
+| `scripts/lightmatter_interconnects.py` | Core study engine: topology models, iterative solver, mapping signatures, TPU cube mapping study, technology catalog, sweep functions, CLI. |
 | `scripts/generate_lightmatter_notebook.py` | Programmatic notebook generator. |
-| `tests/test_lightmatter_project.py` | 52-test suite covering all components. |
-| `arch/tpu_lightmatter_cluster.yaml` | AccelForge architecture: logical cluster memory + node array + HBM + UB + MAC. |
+| `tests/test_lightmatter_project.py` | 57-test suite covering all components. |
+| `arch/tpu_lightmatter_cluster.yaml` | AccelForge architecture: 2D/3D logical cluster memory + node array + HBM + UB + MAC. |
 | `workload/single_matmul.yaml` | Parameterized GEMM workload template (M, K, N, bits). |
+| `results/presentation/` | Concise final-report package: executive summary, topology diagram, and condensed plots. |
 
 ## Technology Catalog
 
@@ -23,10 +24,10 @@ AccelForge's iterative hardware mapper.
 |---|---|---|---|---|
 | Electrical 800G | 800 Gbps | 10.0 (assumed) | No | TPU v5p ICI inference |
 | **EVK50** | 800 Gbps | 4.6 | Yes | SC25 demo, Dec 2025 |
-| **EVK100** | 3.2 Tbps | **1.9** | Yes | ISES Korea 2025 paper |
+| **EVK100** | 3.2 Tbps | **1.9** | Yes | Passage family / ISES Korea 2025 reference value; 3.2 pJ/bit tracked as conservative sensitivity context |
 | **L200** | 16 Tbps | 4.5 | Yes | Product page (32 Tbps total) |
 | **L200X** | 32 Tbps | 4.8 | Yes | Product page (64 Tbps total) |
-| **M1000** | 57 Tbps | 4.0 | Yes + OCS | Press release (114 Tbps total) |
+| **M1000** | 57.3 Tbps | 2.3 | Yes + OCS | M1000 EVK product page (114.6 Tbps total bi-directional) |
 
 ## Key Results
 
@@ -44,7 +45,11 @@ AccelForge's iterative hardware mapper.
 |---|---|---|---|
 | Photonic torus (EVK100) | 81 % energy ↓ | 81 % energy ↓ | **99.7 %** energy ↓ |
 | Photonic switched (L200) | 85 % energy ↓ | 89 % energy ↓ | **99.8 %** energy ↓ |
-| Photonic switched (M1000) | 87 % energy ↓ | 90 % energy ↓ | **99.8 %** energy ↓ |
+| Photonic switched (M1000) | 92 % energy ↓ | 94 % energy ↓ | **99.9 %** energy ↓ |
+
+### Mapping-Choice Result
+
+The fixed-point AccelForge tile/residency signatures are stable in the tested TPU-cube cases, but the best **distributed inference mapping** changes when photonic multicast becomes cheap. For `prefill_projection`, the electrical baseline prefers `node_to_node`, while EVK100/L200/L200X/M1000 photonic variants prefer `shared_dram_multicast`, yielding about 11 % mapping-aware energy gain on the 4×4×4 cube.
 
 ## Generated Outputs (results/)
 
@@ -55,6 +60,9 @@ extended_cluster_study.csv — all 6 workloads × 3 scenarios
 node_scaling.csv           — improvement vs. node count (2–128)
 tpu_cube_case_study.csv    — 5 variants × 3 traffic cases
 tpu_improvements.csv       — % reductions vs. electrical torus baseline
+tpu_mapping_study.csv      — AccelForge fixed-point 4×4×4 TPU-cube remapping study
+optimal_mapping_choices.csv — best distributed mapping per architecture/workload
+presentation/              — concise executive summary + 3 chart/diagram assets
 sources.csv                — research bibliography
 summary.md                 — auto-generated highlights report
 *.png                      — all plots (tech_catalog, convergence, heatmap, ...)
@@ -69,7 +77,7 @@ make study
 # Regenerate and execute the notebook
 make notebook
 
-# Run all 52 tests
+# Run all 57 tests
 make test
 
 # Clean generated outputs
@@ -85,5 +93,6 @@ All targets run inside the AccelForge Docker container (`timeloopaccelergy/accel
 | M1: Network model + logical memory | `solve_iteratively`, `Topology` classes, `arch/tpu_lightmatter_cluster.yaml` |
 | M2: Iterative mapper + convergence analysis | `solve_iteratively`, `compare_topologies`, notebook §Milestone 2 |
 | M3: Proposed optical topology | `OpticalCrossbarTopology`, `cluster_improvement_frame`, notebook §Milestone 3 |
-| TPU cube ICI study | `tpu_cube_case_study`, `tpu_improvement_frame`, notebook §TPU Cube |
+| TPU cube ICI study | `tpu_cube_case_study`, `tpu_improvement_frame`, `tpu_cube_mapping_study`, notebook §TPU Cube |
+| Mapping-choice analysis | `optimal_distributed_mapping_frame`, `mapping_signature`, `mapping_features_frame`, notebook §TPU Cube Mapping Adaptation |
 | Extended: sensitivity + scaling | `bandwidth_sensitivity_network`, `energy_per_bit_sensitivity_network`, notebook §Sensitivity |

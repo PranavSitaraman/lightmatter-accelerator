@@ -1,5 +1,6 @@
 {% set NODES_X = NODES_X | default(4) %}
 {% set NODES_Y = NODES_Y | default(4) %}
+{% set NODES_Z = NODES_Z | default(1) %}
 {% set PE_X = PE_X | default(64) %}
 {% set PE_Y = PE_Y | default(64) %}
 {% set HBM_GIB = HBM_GIB | default(8) %}
@@ -25,7 +26,7 @@ arch:
   nodes:
   - !Memory
     name: LogicalClusterMemory
-    size: {{ NODES_X * NODES_Y * HBM_GIB * 1024 * 1024 * 1024 * 8 }}
+    size: {{ NODES_X * NODES_Y * NODES_Z * HBM_GIB * 1024 * 1024 * 1024 * 8 }}
     area: 0
     leak_power: 0
     total_latency: max(read_latency, write_latency)
@@ -39,6 +40,9 @@ arch:
     spatial:
     - {name: NodeX, fanout: {{ NODES_X }}, min_usage: 1}
     - {name: NodeY, fanout: {{ NODES_Y }}, min_usage: 1}
+{% if NODES_Z > 1 %}
+    - {name: NodeZ, fanout: {{ NODES_Z }}, min_usage: 1}
+{% endif %}
 
   - !Memory
     name: HBM

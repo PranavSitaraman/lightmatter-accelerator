@@ -6,8 +6,8 @@ The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/fin
 
 - an executed exploratory notebook,
 - reusable study code and a CLI,
-- generated CSV and Markdown artifacts,
-- automated smoke tests,
+- generated CSV, Markdown, and presentation-ready chart artifacts,
+- automated unit/integration tests,
 - a cleaned architecture/workload setup focused on the final project rather than the earlier lab template.
 
 ## Main Artifacts
@@ -17,6 +17,7 @@ The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/fin
 - Notebook generator: [workspace/final_project/scripts/generate_lightmatter_notebook.py](/home/pranav/6.5930/final-project/workspace/final_project/scripts/generate_lightmatter_notebook.py)
 - Architecture: [workspace/final_project/arch/tpu_lightmatter_cluster.yaml](/home/pranav/6.5930/final-project/workspace/final_project/arch/tpu_lightmatter_cluster.yaml)
 - Workload: [workspace/final_project/workload/single_matmul.yaml](/home/pranav/6.5930/final-project/workspace/final_project/workload/single_matmul.yaml)
+- Condensed presentation package: [workspace/final_project/results/presentation](/home/pranav/6.5930/final-project/workspace/final_project/results/presentation)
 
 ## Usage
 

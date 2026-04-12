@@ -77,14 +77,15 @@ analyze the resulting architecture.
     cells.append(md(
         """## Research Basis
 
-All specifications below were verified against public sources as of **April 1–2, 2026**.
+All specifications below were verified against public sources as of **April 12, 2026**.
 
 | Source | Key Numbers |
 |---|---|
 | Lightmatter SC25 demo (Dec 2025) | EVK50: 800 Gbps/fiber BiDi, **4.6 pJ/bit** total |
-| Lightmatter ISES Korea 2025 paper | EVK100: 3.2 Tbps/fiber, **1.9 pJ/bit** at 112G PAM4 |
+| Lightmatter Passage page + ISES Korea 2025 paper | EVK100: 3.2 Tbps/fiber, **1.9 pJ/bit** reference value |
+| Lightmatter EVK100 technical page | Conservative EVK100 point: **3.2 pJ/bit** at 112G PAM4 |
 | Lightmatter Passage L200 product page | L200: **32 Tbps** total chip I/O, <5 pJ/bit; L200X: **64 Tbps** |
-| Lightmatter M1000 press release (May 2025) | M1000: **114 Tbps** total, 256 fibers, built-in OCS |
+| Lightmatter M1000 EVK product page | M1000: **114.6 Tbps** total bi-directional, **2.3 pJ/bit** including laser, built-in OCS |
 | Lightmatter OCP announcement (Mar 2026) | Open CPO reference architecture initiative |
 | Lightmatter world-record press release (Mar 2026) | **1.6 Tbps/fiber** at 112G PAM4 |
 | Google Cloud TPU v5p docs | **1200 GB/s** bidirectional ICI/chip, 4×4×4 torus |
@@ -95,6 +96,9 @@ Two modeling assumptions are **not** publicly disclosed and are treated as expli
 - Per-hop router latency: **5 ns** (electrical) / **1–2.5 ns** (optical)
 
 These are intentionally conservative and easy to change in `scripts/lightmatter_interconnects.py`.
+EVK100 energy is the one intentional optimistic/reference value: public Lightmatter pages expose
+both 1.9 pJ/bit and 3.2 pJ/bit values, so we model 1.9 pJ/bit and keep the sensitivity sweeps
+available to evaluate the more conservative point.
 """
     ))
 
@@ -138,10 +142,13 @@ from scripts.lightmatter_interconnects import (
     solve_iteratively,
     history_to_frame,
     per_component_energy_frame,
+    mapping_features_frame,
     compare_topologies,
     cluster_improvement_frame,
     tpu_cube_case_study,
     tpu_improvement_frame,
+    tpu_cube_mapping_study,
+    optimal_distributed_mapping_frame,
     all_technologies_network_comparison,
     bandwidth_sensitivity_network,
     energy_per_bit_sensitivity_network,
@@ -429,7 +436,9 @@ study_df[summary_cols].sort_values(["scenario", "workload", "topology"]).reset_i
 
 `mapping_sensitivity_energy_pct` compares the *final converged* result to the
 *first pass augmented with network overhead*. A non-zero value means the mapper
-found a different (better) tiling strategy once it knew the true network cost.
+or fixed-point cost model changed the final objective after it saw the true network cost.
+The separate distributed-mapping section later asks whether the best communication
+strategy changes between interconnects.
 """
     ))
 
@@ -514,10 +523,10 @@ plt.show()
 - The electrical mesh never fully converges within the first 6 iterations for the high-traffic
   node_to_dram scenario — the mapper keeps responding to rising network costs by shifting data
   toward local compute at the cost of more MAC operations.
-- The optical crossbar converges in 2–3 iterations because its per-bit network cost is so low
+- The optical crossbar converges in 2–3 iterations because its per-bit network cost is low enough
   that it barely perturbs the original HBM-dominant mapping.
-- This means the **mapping-sensitivity effect is predominantly an electrical-fabric problem**.
-  Replacing the ICI with Lightmatter optics reduces the sensitivity almost to zero.
+- This means the **fixed-point sensitivity effect is predominantly an electrical-fabric problem**.
+  Replacing the ICI with Lightmatter optics reduces the sensitivity almost to zero in these cases.
 """
     ))
 
@@ -967,7 +976,7 @@ We evaluate five variants for the 64-chip 4×4×4 cube:
 2. **Photonic torus (EVK100)** — same topology, EVK100 links (3.2 Tbps/axis, 1.9 pJ/bit)
 3. **Photonic switched fabric (L200)** — optical crossbar, 16 Tbps one-way, 4.5 pJ/bit
 4. **Photonic switched fabric (L200X)** — optical crossbar, 32 Tbps one-way, 4.8 pJ/bit
-5. **Photonic switched fabric (M1000)** — OCS-based crossbar, 57 Tbps one-way, 4.0 pJ/bit
+5. **Photonic switched fabric (M1000)** — OCS-based crossbar, 57.3 Tbps one-way, 2.3 pJ/bit
 """
     ))
 
@@ -1058,7 +1067,7 @@ plt.show()
 - Replaces the torus with an optical crossbar — any-to-any in a single hop.
 - Eliminates multi-hop routing for `all_to_all_shard_exchange` and `shared_weight_multicast`.
 - Enables true multicast, which dramatically reduces `shared_weight_multicast` energy.
-- M1000 achieves the highest bandwidth (57 Tbps one-way) with built-in OCS switching.
+- M1000 achieves the highest bandwidth (57.3 Tbps one-way) with built-in OCS switching.
 - Best fit for: MoE inference workloads and all-to-all collective operations.
 
 **The architectural implication:**
@@ -1071,7 +1080,99 @@ It changes which topology is *feasible*:
     ))
 
     # ------------------------------------------------------------------ #
-    # Section 14: Summary pivot
+    # Section 14: TPU cube mapping adaptation
+    # ------------------------------------------------------------------ #
+    cells.append(md(
+        """## TPU Cube Mapping Adaptation — New Optimal Mappings
+
+The previous TPU-cube table was a pure network calculation over large traffic cases.
+Here we run AccelForge itself on a 4×4×4 logical cube and feed the interconnect costs
+back into the mapper. This directly tests the central architecture question:
+
+> Does replacing TPU ICI merely reduce link cost, or does it also change the optimal mapping?
+
+We compare the electrical torus against an EVK100 photonic torus and L200/L200X/M1000
+switched fabrics. The `mapping_differs_from_electrical` column is computed from a compact
+mapping signature that captures spatial usage, logical-memory transfers, and memory residency.
+"""
+    ))
+
+    cells.append(code(
+        """
+tpu_mapping_df = tpu_cube_mapping_study(
+    workload_names=("kv_attention", "prefill_projection"),
+    scenario_names=DEFAULT_SCENARIO_NAMES,
+    max_iterations=4,
+)
+tpu_mapping_df.to_csv(RESULTS_DIR / "tpu_mapping_study.csv", index=False)
+
+mapping_cols = [
+    "variant", "workload", "scenario", "iterations",
+    "final_energy_uJ", "energy_reduction_vs_electrical_pct",
+    "mapping_sensitivity_energy_pct", "final_remote_bits_kib",
+    "mapping_differs_from_electrical", "spatial_NodeX_usage",
+    "spatial_NodeY_usage", "spatial_NodeZ_usage",
+]
+tpu_mapping_df[mapping_cols].sort_values(
+    ["scenario", "energy_reduction_vs_electrical_pct"], ascending=[True, False]
+).reset_index(drop=True)
+"""
+    ))
+
+    cells.append(code(
+        """
+tpu_optimal_mappings = optimal_distributed_mapping_frame(
+    tpu_mapping_df,
+    baseline_architecture="TPU cube electrical torus",
+)
+tpu_optimal_mappings[
+    [
+        "workload", "architecture", "optimal_distributed_mapping",
+        "baseline_distributed_mapping", "optimal_mapping_changed_vs_baseline",
+        "energy_gain_vs_baseline_optimal_pct",
+    ]
+]
+"""
+    ))
+
+    cells.append(code(
+        """
+photonic_mapping = tpu_mapping_df[
+    tpu_mapping_df["variant"] != "TPU cube electrical torus"
+].copy()
+photonic_mapping["label"] = (
+    photonic_mapping["variant"].str.replace("TPU cube ", "", regex=False)
+    + "\\n" + photonic_mapping["scenario"]
+)
+
+fig, ax = plt.subplots(figsize=(12, 5))
+plot_df = photonic_mapping.sort_values(
+    "energy_reduction_vs_electrical_pct", ascending=False
+)
+colors = ["#31A354" if x else "#9ECAE1" for x in plot_df["mapping_differs_from_electrical"]]
+ax.bar(plot_df["label"], plot_df["energy_reduction_vs_electrical_pct"], color=colors)
+ax.set_title("TPU Cube Mapping-Aware Energy Reduction vs Electrical Torus")
+ax.set_ylabel("Energy reduction (%)")
+ax.tick_params(axis="x", rotation=35, labelsize=8)
+ax.axhline(0, color="black", linewidth=0.8)
+plt.tight_layout()
+plt.show()
+"""
+    ))
+
+    cells.append(md(
+        """### Mapping-Adaptation Takeaway
+
+The switched optical fabrics tend to make the logical-memory level cheaper and flatter:
+the mapper can keep global traffic in the logical cluster level without paying the
+same distance/contention penalty that dominates the electrical torus. When a row reports
+`mapping_differs_from_electrical = True`, the gain is not just a link-cost substitution;
+AccelForge selected a different compact mapping signature after the interconnect change.
+"""
+    ))
+
+    # ------------------------------------------------------------------ #
+    # Section 15: Summary pivot
     # ------------------------------------------------------------------ #
     cells.append(md(
         """## Summary Results
@@ -1125,15 +1226,16 @@ print(tpu_best.to_string())
    activation traffic is smaller. But it still sees a meaningful reduction in latency
    (shorter path, lower router latency).
 
-4. **The mapping responds to network costs.** The iterative loop converges quickly for
-   optical (2–3 iterations) but slowly for electrical (up to 6 iterations) because
-   the mapper keeps re-optimizing tiling to cope with the rising network penalty.
+4. **The project now separates two mapping effects.** The fixed-point loop measures
+   tile/residency sensitivity after network feedback, while the distributed-mapping
+   table shows which communication strategy (`node_to_node`, `node_to_dram`, or
+   `shared_dram_multicast`) becomes optimal under each interconnect.
 
 5. **For the TPU cube:** A photonic switched fabric (L200 or higher) eliminates
    multi-hop routing entirely. The gain over a photonic torus is largest for
    global traffic patterns — `all_to_all_shard_exchange` and `shared_weight_multicast`.
 
-6. **M1000 at 114 Tbps aggregate** represents the next architectural step:
+6. **M1000 at 114.6 Tbps aggregate** represents the next architectural step:
    not just a faster link but an on-chip OCS that enables dynamic reconfiguration
    of the network fabric without static cabling changes.
 """

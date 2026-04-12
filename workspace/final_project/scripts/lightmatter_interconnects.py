@@ -8,7 +8,7 @@ Covers all three project milestones:
 
 Plus: TPU cube ICI replacement study using EVK100, L200, L200X, and M1000 class links.
 
-Public sources were checked / dated April 1, 2026.
+Public sources were checked / dated April 12, 2026.
 """
 
 from __future__ import annotations
@@ -84,11 +84,12 @@ RESEARCH_NOTES: dict[str, dict[str, str]] = {
         ),
     },
     "lightmatter_evk100": {
-        "date": "2025",
+        "date": "viewed 2026-04-12",
         "url": "https://lightmatter.co/products/passage/",
         "summary": (
             "Passage EVK100: 3.2 Tbps per fiber at 112G PAM4 (16 lambda). "
-            "1.9 pJ/bit (per ISES Korea 2025 efficiency table). "
+            "1.9 pJ/bit reference value on the Passage product family page / ISES Korea 2025; "
+            "the EVK100 technical-spec page also lists a conservative 3.2 pJ/bit point. "
             "Monolithic PIC: MRM modulators, TIAs, Tx drivers on single chip."
         ),
     },
@@ -102,12 +103,12 @@ RESEARCH_NOTES: dict[str, dict[str, str]] = {
         ),
     },
     "lightmatter_m1000": {
-        "date": "2025-05",
-        "url": "https://lightmatter.co/press-release/lightmatter-unveils-passage-m1000-photonic-superchip-worlds-fastest-ai-interconnect/",
+        "date": "viewed 2026-04-12",
+        "url": "https://lightmatter.co/products/passage-m1000-evk/",
         "summary": (
-            "Passage M1000: 114 Tbps total, 256 edge-attached fibers, 1024 SerDes lanes. "
-            "7735 mm² package, 34 chiplets, built-in solid-state OCS. "
-            "Sampling summer 2025."
+            "Passage M1000 EVK: 114.6 Tbps total bi-directional bandwidth, "
+            "2.3 pJ/bit system-level efficiency including laser, 1024 SerDes lanes, "
+            "256 optical fibers, 4,000 mm² active interposer area, integrated solid-state OCS."
         ),
     },
     "lightmatter_ocp": {
@@ -139,7 +140,7 @@ RESEARCH_NOTES: dict[str, dict[str, str]] = {
         ),
     },
     "tpu_v5p": {
-        "date": "viewed 2026-04-01",
+        "date": "viewed 2026-04-12",
         "url": "https://cloud.google.com/tpu/docs/v5p",
         "summary": (
             "TPU v5p: 459 TFLOPS/chip, 95 GB HBM, 2.8 TBps HBM BW, "
@@ -321,6 +322,8 @@ class IterationRecord:
     traffic: TrafficBreakdown
     network: NetworkCost
     per_component_energy: dict[str, float]
+    mapping_signature: str
+    mapping_features: dict[str, float]
 
 
 # ---------------------------------------------------------------------------
@@ -613,7 +616,9 @@ LIGHTMATTER_EVK100 = InterconnectTech(
     router_latency_s=1.5e-9,
     supports_multicast=True,
     notes=(
-        "Passage EVK100: 3.2 Tbps/fiber, 1.9 pJ/bit at 112G PAM4 (ISES Korea 2025 paper). "
+        "Passage EVK100: 3.2 Tbps/fiber, 1.9 pJ/bit reference value at 112G PAM4 "
+        "(Passage family page / ISES Korea 2025). The EVK100 technical-spec page also lists "
+        "a conservative 3.2 pJ/bit point, so the sensitivity sweeps should be used for that case. "
         "Monolithic PIC integrates MRM modulators, TIAs, Tx drivers on a single chip."
     ),
 )
@@ -644,13 +649,14 @@ LIGHTMATTER_L200X = InterconnectTech(
 
 LIGHTMATTER_M1000 = InterconnectTech(
     name="Lightmatter M1000",
-    link_bandwidth_bps=57e12,       # 114 Tbps aggregate / 2 directions = 57 Tbps one-way
-    energy_per_bit_j=4.0e-12,       # <5 pJ/bit; better efficiency at scale
+    link_bandwidth_bps=57.3e12,     # 114.6 Tbps aggregate / 2 directions = 57.3 Tbps one-way
+    energy_per_bit_j=2.3e-12,       # System-level efficiency including laser
     router_latency_s=2.5e-9,        # slightly higher: includes built-in OCS switching
     supports_multicast=True,
     notes=(
-        "Passage M1000: 114 Tbps total (256 fibers, 1024 SerDes), 7735 mm² package, 34 chiplets, "
-        "built-in solid-state OCS. Sampling summer 2025. Modeled as 57 Tbps one-way."
+        "Passage M1000 EVK: 114.6 Tbps total bi-directional bandwidth, 2.3 pJ/bit "
+        "system-level efficiency including laser, 256 fibers, 1024 SerDes lanes, "
+        "4,000 mm² active interposer, built-in solid-state OCS. Modeled as 57.3 Tbps one-way."
     ),
 )
 
@@ -702,8 +708,10 @@ def _build_spec(
     logical_write_latency_s: float = HBM_LATENCY_PER_BIT_S,
     node_x: int = 4,
     node_y: int = 4,
+    node_z: int = 1,
     pe_x: int = 64,
     pe_y: int = 64,
+    hbm_gib: int = 8,
 ) -> af.Spec:
     jinja = {
         "COMM_PATTERN": scenario.comm_pattern,
@@ -713,8 +721,10 @@ def _build_spec(
         "LOGICAL_WRITE_LATENCY": logical_write_latency_s,
         "NODES_X": node_x,
         "NODES_Y": node_y,
+        "NODES_Z": node_z,
         "PE_X": pe_x,
         "PE_Y": pe_y,
+        "HBM_GIB": hbm_gib,
         "M": workload.M,
         "K": workload.K,
         "N": workload.N,
@@ -760,6 +770,102 @@ def extract_traffic(best_mapping: af.Mapping) -> TrafficBreakdown:
     )
 
 
+def mapping_feature_dict(best_mapping: af.Mapping) -> dict[str, float]:
+    """
+    Return a compact numeric fingerprint of the best mapping.
+
+    AccelForge exposes a very rich `Total<SEP>mapping` object that is too verbose for
+    reports. This helper keeps only the fields that are useful for explaining why a
+    mapping changed: spatial fanout usage, selected memory residency, and action bits.
+    """
+    if best_mapping is None or best_mapping.data.empty:
+        return {}
+
+    row = best_mapping.data.iloc[0]
+    features: dict[str, float] = {}
+    for col, value in row.items():
+        parts = col.split("<SEP>")
+        if len(parts) != 5:
+            continue
+        einsum, kind, level, component, detail = parts
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if numeric == 0:
+            continue
+        if kind == "usage" and level == "spatial":
+            features[f"spatial::{component}::{detail}"] = numeric
+        elif kind == "usage" and level == "memory":
+            features[f"memory::{component}::{detail}"] = numeric
+        elif kind == "action":
+            features[f"action::{level}::{component}::{detail}"] = numeric
+    return features
+
+
+def mapping_signature(best_mapping: af.Mapping, max_terms: int = 18) -> str:
+    """
+    Human-readable mapping fingerprint for tables and presentation summaries.
+
+    The signature is intentionally lossy: it keeps the high-signal spatial and
+    memory/action choices while avoiding AccelForge's very long object repr.
+    """
+    features = mapping_feature_dict(best_mapping)
+    if not features:
+        return "empty"
+
+    priority = {
+        "spatial::NodeArray::NodeX": 0,
+        "spatial::NodeArray::NodeY": 1,
+        "spatial::NodeArray::NodeZ": 2,
+        "spatial::ProcessingElement::reuse_input": 3,
+        "spatial::ProcessingElement::reuse_output": 4,
+    }
+
+    def _sort_key(item: tuple[str, float]) -> tuple[float, str]:
+        key, _ = item
+        if key in priority:
+            return (priority[key], key)
+        if key.startswith("action::LogicalClusterMemory"):
+            return (10, key)
+        if key.startswith("memory::LogicalClusterMemory"):
+            return (20, key)
+        if key.startswith("memory::HBM"):
+            return (30, key)
+        return (100, key)
+
+    terms = []
+    for key, value in sorted(features.items(), key=_sort_key)[:max_terms]:
+        short_key = (
+            key.replace("spatial::NodeArray::", "node.")
+            .replace("spatial::ProcessingElement::", "pe.")
+            .replace("action::LogicalClusterMemory::", "logical.")
+            .replace("memory::LogicalClusterMemory::", "logical_usage.")
+            .replace("memory::HBM::", "hbm_usage.")
+            .replace("memory::UnifiedBuffer::", "ub_usage.")
+        )
+        if abs(value) >= 1024:
+            value_text = f"{value / 1024:.1f} Kib"
+        else:
+            value_text = f"{value:.4g}"
+        terms.append(f"{short_key}={value_text}")
+    return "; ".join(terms)
+
+
+def mapping_features_frame(best_mapping: af.Mapping) -> pd.DataFrame:
+    """Return the mapping fingerprint as a tidy DataFrame."""
+    rows = []
+    for key, value in mapping_feature_dict(best_mapping).items():
+        parts = key.split("::")
+        rows.append({
+            "kind": parts[0],
+            "component": parts[1] if len(parts) > 1 else "",
+            "detail": "::".join(parts[2:]),
+            "value": value,
+        })
+    return pd.DataFrame(rows).sort_values(["kind", "component", "detail"]).reset_index(drop=True)
+
+
 def run_one_iteration(
     workload: WorkloadCase,
     scenario: Scenario,
@@ -767,6 +873,9 @@ def run_one_iteration(
     logical_write_energy_j: float,
     logical_read_latency_s: float,
     logical_write_latency_s: float,
+    node_shape: tuple[int, int, int] = (4, 4, 1),
+    pe_shape: tuple[int, int] = (64, 64),
+    hbm_gib: int = 8,
 ) -> tuple[af.Mapping, TrafficBreakdown]:
     spec = _build_spec(
         workload,
@@ -775,6 +884,12 @@ def run_one_iteration(
         logical_write_energy_j=logical_write_energy_j,
         logical_read_latency_s=logical_read_latency_s,
         logical_write_latency_s=logical_write_latency_s,
+        node_x=node_shape[0],
+        node_y=node_shape[1],
+        node_z=node_shape[2],
+        pe_x=pe_shape[0],
+        pe_y=pe_shape[1],
+        hbm_gib=hbm_gib,
     )
     mappings = spec.map_workload_to_arch(
         print_progress=False,
@@ -795,6 +910,9 @@ def solve_iteratively(
     tech: InterconnectTech,
     max_iterations: int = 6,
     convergence_tol: float = 1e-4,
+    node_shape: tuple[int, int, int] = (4, 4, 1),
+    pe_shape: tuple[int, int] = (64, 64),
+    hbm_gib: int = 8,
 ) -> tuple[list[IterationRecord], af.Mapping]:
     """
     Run AccelForge mapper repeatedly, folding network costs back into the
@@ -818,10 +936,14 @@ def solve_iteratively(
             logical_write_energy_j,
             logical_read_latency_s,
             logical_write_latency_s,
+            node_shape=node_shape,
+            pe_shape=pe_shape,
+            hbm_gib=hbm_gib,
         )
         network = topology.evaluate(traffic, scenario, tech)
         total_energy = float(mapping.energy())
         total_latency = float(mapping.latency())
+        features = mapping_feature_dict(mapping)
 
         history.append(
             IterationRecord(
@@ -838,6 +960,8 @@ def solve_iteratively(
                     k: float(v)
                     for k, v in mapping.energy(per_component=True).items()
                 },
+                mapping_signature=mapping_signature(mapping),
+                mapping_features=features,
             )
         )
         final_mapping = mapping
@@ -886,6 +1010,10 @@ def history_to_frame(history: Iterable[IterationRecord]) -> pd.DataFrame:
             "remote_output_kibits": r.traffic.output_write_bits / 1024.0,
             "network_energy_uJ": r.network.total_energy_j * 1e6,
             "network_latency_us": r.network.total_latency_s * 1e6,
+            "mapping_signature": r.mapping_signature,
+            "spatial_NodeX_usage": r.mapping_features.get("spatial::NodeArray::NodeX", 0.0),
+            "spatial_NodeY_usage": r.mapping_features.get("spatial::NodeArray::NodeY", 0.0),
+            "spatial_NodeZ_usage": r.mapping_features.get("spatial::NodeArray::NodeZ", 0.0),
         })
     return pd.DataFrame(rows)
 
@@ -912,6 +1040,9 @@ def compare_topologies(
     scenario_names: Iterable[str],
     topology_to_tech: dict[Topology, InterconnectTech],
     max_iterations: int = 6,
+    node_shape: tuple[int, int, int] = (4, 4, 1),
+    pe_shape: tuple[int, int] = (64, 64),
+    hbm_gib: int = 8,
 ) -> pd.DataFrame:
     """
     Run the full iterative study for every (workload, scenario, topology) combination.
@@ -926,7 +1057,14 @@ def compare_topologies(
             scenario = scenario_case(scenario_name)
             for topology, tech in topology_to_tech.items():
                 history, final_mapping = solve_iteratively(
-                    workload, scenario, topology, tech, max_iterations=max_iterations
+                    workload,
+                    scenario,
+                    topology,
+                    tech,
+                    max_iterations=max_iterations,
+                    node_shape=node_shape,
+                    pe_shape=pe_shape,
+                    hbm_gib=hbm_gib,
                 )
                 baseline_energy = history[0].total_energy_j
                 baseline_latency = history[0].total_latency_s
@@ -934,6 +1072,8 @@ def compare_topologies(
                 final_latency = history[-1].total_latency_s
                 first_plus_net_energy = baseline_energy + history[0].network.total_energy_j
                 first_plus_net_latency = baseline_latency + history[0].network.total_latency_s
+                first_traffic_bits = history[0].traffic.total_bits
+                final_traffic_bits = history[-1].traffic.total_bits
                 rows.append({
                     "workload": workload.name,
                     "scenario": scenario.name,
@@ -957,6 +1097,23 @@ def compare_topologies(
                         if first_plus_net_latency > 0 else 0.0
                     ),
                     "remote_bits_kib": history[-1].traffic.total_bits / 1024.0,
+                    "first_remote_bits_kib": first_traffic_bits / 1024.0,
+                    "remote_bits_change_pct": (
+                        100 * (final_traffic_bits / first_traffic_bits - 1.0)
+                        if first_traffic_bits > 0 else 0.0
+                    ),
+                    "mapping_changed": history[0].mapping_signature != history[-1].mapping_signature,
+                    "first_mapping_signature": history[0].mapping_signature,
+                    "final_mapping_signature": history[-1].mapping_signature,
+                    "spatial_NodeX_usage": history[-1].mapping_features.get(
+                        "spatial::NodeArray::NodeX", 0.0
+                    ),
+                    "spatial_NodeY_usage": history[-1].mapping_features.get(
+                        "spatial::NodeArray::NodeY", 0.0
+                    ),
+                    "spatial_NodeZ_usage": history[-1].mapping_features.get(
+                        "spatial::NodeArray::NodeZ", 0.0
+                    ),
                     "mac_energy_uJ": (
                         final_mapping.energy(per_component=True).get("MAC", 0.0) * 1e6
                     ),
@@ -1177,7 +1334,7 @@ def tpu_cube_case_study() -> pd.DataFrame:
     photonic_torus_evk100_bps = 3200e9          # EVK100: 3.2 Tbps one-way
     l200_one_way_bps = 16e12                    # L200: 32 Tbps total / 2 dirs
     l200x_one_way_bps = 32e12                   # L200X: 64 Tbps total / 2 dirs
-    m1000_one_way_bps = 57e12                   # M1000: 114 Tbps total / 2 dirs
+    m1000_one_way_bps = 57.3e12                 # M1000: 114.6 Tbps total / 2 dirs
 
     variants: list[tuple[str, Topology, InterconnectTech]] = [
         (
@@ -1237,10 +1394,10 @@ def tpu_cube_case_study() -> pd.DataFrame:
             InterconnectTech(
                 name="Photonic switched M1000",
                 link_bandwidth_bps=m1000_one_way_bps,
-                energy_per_bit_j=4.0e-12,
+                energy_per_bit_j=2.3e-12,
                 router_latency_s=2.5e-9,
                 supports_multicast=True,
-                notes="M1000 OCS-based crossbar; 57 Tbps one-way from 114 Tbps aggregate.",
+                notes="M1000 OCS-based crossbar; 57.3 Tbps one-way from 114.6 Tbps aggregate.",
             ),
         ),
     ]
@@ -1298,6 +1455,126 @@ def tpu_improvement_frame(
     return merged.sort_values(["case", "variant"]).reset_index(drop=True)
 
 
+def tpu_cube_mapping_study(
+    workload_names: Iterable[str] = ("kv_attention",),
+    scenario_names: Iterable[str] = DEFAULT_SCENARIO_NAMES,
+    max_iterations: int = 4,
+    node_shape: tuple[int, int, int] = (4, 4, 4),
+    hbm_gib: int = 95,
+) -> pd.DataFrame:
+    """
+    AccelForge mapping-adaptation study for a TPU-v5p-style 4x4x4 cube.
+
+    Unlike `tpu_cube_case_study`, which is a pure network calculation over large
+    traffic cases, this function runs the iterative AccelForge mapper. It answers
+    the project-specific question: when the cube interconnect changes, how much
+    does the fixed-point mapping objective move, and does the compact
+    tile/residency signature change?
+    """
+    active_nodes = math.prod(node_shape)
+    variants: list[tuple[str, Topology, InterconnectTech]] = [
+        ("TPU cube electrical torus", Torus3DTopology(*node_shape), ELECTRICAL_800G),
+        ("TPU cube EVK100 photonic torus", Torus3DTopology(*node_shape), LIGHTMATTER_EVK100),
+        ("TPU cube L200 switched fabric", OpticalCrossbarTopology(), LIGHTMATTER_L200),
+        ("TPU cube L200X switched fabric", OpticalCrossbarTopology(), LIGHTMATTER_L200X),
+        ("TPU cube M1000 switched fabric", OpticalCrossbarTopology(), LIGHTMATTER_M1000),
+    ]
+
+    rows = []
+    for workload_name in workload_names:
+        workload = workload_case(workload_name)
+        for scenario_name in scenario_names:
+            scenario = scenario_case(scenario_name, active_nodes=active_nodes)
+            for variant, topology, tech in variants:
+                history, _ = solve_iteratively(
+                    workload,
+                    scenario,
+                    topology,
+                    tech,
+                    max_iterations=max_iterations,
+                    node_shape=node_shape,
+                    hbm_gib=hbm_gib,
+                )
+                first = history[0]
+                final = history[-1]
+                first_plus_net_energy = first.total_energy_j + first.network.total_energy_j
+                first_plus_net_latency = first.total_latency_s + first.network.total_latency_s
+                rows.append({
+                    "variant": variant,
+                    "workload": workload.name,
+                    "scenario": scenario.name,
+                    "active_nodes": active_nodes,
+                    "node_shape": "x".join(str(v) for v in node_shape),
+                    "topology": topology.name,
+                    "technology": tech.name,
+                    "iterations": len(history),
+                    "baseline_energy_uJ": first.total_energy_j * 1e6,
+                    "baseline_latency_us": first.total_latency_s * 1e6,
+                    "first_run_plus_network_energy_uJ": first_plus_net_energy * 1e6,
+                    "first_run_plus_network_latency_us": first_plus_net_latency * 1e6,
+                    "final_energy_uJ": final.total_energy_j * 1e6,
+                    "final_latency_us": final.total_latency_s * 1e6,
+                    "network_energy_uJ": final.network.total_energy_j * 1e6,
+                    "network_latency_us": final.network.total_latency_s * 1e6,
+                    "network_delta_energy_pct": 100 * (
+                        final.total_energy_j / first.total_energy_j - 1.0
+                    ),
+                    "mapping_sensitivity_energy_pct": (
+                        100 * (final.total_energy_j / first_plus_net_energy - 1.0)
+                        if first_plus_net_energy > 0 else 0.0
+                    ),
+                    "mapping_sensitivity_latency_pct": (
+                        100 * (final.total_latency_s / first_plus_net_latency - 1.0)
+                        if first_plus_net_latency > 0 else 0.0
+                    ),
+                    "first_remote_bits_kib": first.traffic.total_bits / 1024.0,
+                    "final_remote_bits_kib": final.traffic.total_bits / 1024.0,
+                    "remote_bits_change_pct": (
+                        100 * (final.traffic.total_bits / first.traffic.total_bits - 1.0)
+                        if first.traffic.total_bits > 0 else 0.0
+                    ),
+                    "mapping_changed_during_convergence": (
+                        first.mapping_signature != final.mapping_signature
+                    ),
+                    "first_mapping_signature": first.mapping_signature,
+                    "final_mapping_signature": final.mapping_signature,
+                    "spatial_NodeX_usage": final.mapping_features.get(
+                        "spatial::NodeArray::NodeX", 0.0
+                    ),
+                    "spatial_NodeY_usage": final.mapping_features.get(
+                        "spatial::NodeArray::NodeY", 0.0
+                    ),
+                    "spatial_NodeZ_usage": final.mapping_features.get(
+                        "spatial::NodeArray::NodeZ", 0.0
+                    ),
+                })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    baseline = df[df["variant"] == "TPU cube electrical torus"][
+        ["workload", "scenario", "final_energy_uJ", "final_latency_us", "final_mapping_signature"]
+    ].rename(
+        columns={
+            "final_energy_uJ": "electrical_final_energy_uJ",
+            "final_latency_us": "electrical_final_latency_us",
+            "final_mapping_signature": "electrical_mapping_signature",
+        }
+    )
+    df = df.merge(baseline, on=["workload", "scenario"], how="left")
+    df["energy_reduction_vs_electrical_pct"] = 100 * (
+        1 - df["final_energy_uJ"] / df["electrical_final_energy_uJ"]
+    )
+    df["latency_reduction_vs_electrical_pct"] = 100 * (
+        1 - df["final_latency_us"] / df["electrical_final_latency_us"]
+    )
+    df["mapping_differs_from_electrical"] = (
+        df["final_mapping_signature"] != df["electrical_mapping_signature"]
+    )
+    return df.sort_values(["scenario", "workload", "variant"]).reset_index(drop=True)
+
+
 # ---------------------------------------------------------------------------
 # Summary report generator
 # ---------------------------------------------------------------------------
@@ -1307,11 +1584,20 @@ def generate_summary_markdown(
     cluster_improvement_df: pd.DataFrame,
     tpu_df: pd.DataFrame,
     tpu_improvement_df: pd.DataFrame,
+    tpu_mapping_df: pd.DataFrame | None = None,
+    optimal_mapping_df: pd.DataFrame | None = None,
 ) -> str:
     lines: list[str] = [
         "# Lightmatter Final Project — Summary",
         "",
         "Generated from the AccelForge + photonic-interconnect study pipeline.",
+        "",
+        "## Executive Takeaways",
+        "",
+        "- The raw network model and the AccelForge fixed-point mapper both show the same direction: optical links help most when traffic leaves a single local HBM bank.",
+        "- Re-running the mapper is explicitly measured: the pipeline reports both fixed-point tile/residency sensitivity and the higher-level distributed mapping choice that becomes optimal under each interconnect.",
+        "- The TPU cube study separates two design points: a conservative EVK100 photonic torus and higher-bandwidth switched-fabric options (L200/L200X/M1000).",
+        "- EVK100 public collateral includes both a 1.9 pJ/bit Passage-family value and a more conservative 3.2 pJ/bit EVK100 technical-spec value; this project uses 1.9 pJ/bit as the main optimistic/reference point and includes sensitivity hooks for alternatives.",
         "",
         "## Technology Catalog",
         "",
@@ -1352,11 +1638,350 @@ def generate_summary_markdown(
             "",
         ])
 
+    if tpu_mapping_df is not None and not tpu_mapping_df.empty:
+        lines.extend(["## TPU Cube Mapping Adaptation (AccelForge fixed point)", ""])
+        mapping_cases = tpu_mapping_df[
+            tpu_mapping_df["variant"] != "TPU cube electrical torus"
+        ].copy()
+        changed = mapping_cases[mapping_cases["mapping_differs_from_electrical"]]
+        best_energy = mapping_cases.loc[
+            mapping_cases["energy_reduction_vs_electrical_pct"].idxmax()
+        ]
+        lines.extend([
+            f"- Best mapping-aware TPU-cube energy reduction: `{best_energy['variant']}` on "
+            f"`{best_energy['workload']} / {best_energy['scenario']}` → "
+            f"`{best_energy['energy_reduction_vs_electrical_pct']:.2f}%`.",
+            f"- Mapping signatures differed from the electrical baseline in "
+            f"`{len(changed)}` of `{len(mapping_cases)}` photonic mapping cases.",
+            f"- Example final mapping signature: `{best_energy['final_mapping_signature']}`",
+            "",
+        ])
+
+    if optimal_mapping_df is not None and not optimal_mapping_df.empty:
+        lines.extend([
+            "## Optimal Distributed Mapping Choices",
+            "",
+            "Here `scenario` is treated as the distributed inference mapping choice: node-to-node activation exchange, node-to-DRAM remote fetch, or shared-DRAM multicast.",
+            "",
+            "| Workload | Architecture | Optimal mapping | Changed vs baseline |",
+            "|---|---|---|---|",
+        ])
+        for row in optimal_mapping_df.itertuples(index=False):
+            changed = getattr(row, "optimal_mapping_changed_vs_baseline", False)
+            lines.append(
+                f"| {row.workload} | {row.architecture} | "
+                f"{row.optimal_distributed_mapping} | {bool(changed)} |"
+            )
+        lines.append("")
+
     lines.extend(["## Sources", ""])
     for _, row in source_frame().iterrows():
         lines.append(f"- **{row['source']}** ({row['date']}): {row['summary']}  \n  {row['url']}")
 
     return "\n".join(lines) + "\n"
+
+
+def executive_summary_frame(
+    cluster_improvement_df: pd.DataFrame,
+    tpu_improvement_df: pd.DataFrame,
+    tpu_mapping_df: pd.DataFrame,
+    optimal_mapping_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Condense the study into a few presentation-ready headline metrics."""
+    rows: list[dict[str, str | float]] = []
+    if not cluster_improvement_df.empty:
+        best_cluster_energy = cluster_improvement_df.loc[
+            cluster_improvement_df["energy_reduction_pct"].idxmax()
+        ]
+        best_cluster_latency = cluster_improvement_df.loc[
+            cluster_improvement_df["latency_reduction_pct"].idxmax()
+        ]
+        rows.extend([
+            {
+                "category": "16-node AccelForge cluster",
+                "metric": "Best energy reduction",
+                "case": f"{best_cluster_energy['workload']} / {best_cluster_energy['scenario']}",
+                "value": best_cluster_energy["energy_reduction_pct"],
+                "unit": "%",
+                "interpretation": "Optical crossbar vs electrical 4x4 mesh.",
+            },
+            {
+                "category": "16-node AccelForge cluster",
+                "metric": "Best latency reduction",
+                "case": f"{best_cluster_latency['workload']} / {best_cluster_latency['scenario']}",
+                "value": best_cluster_latency["latency_reduction_pct"],
+                "unit": "%",
+                "interpretation": "Network-aware fixed-point mapping result.",
+            },
+        ])
+
+    if not tpu_improvement_df.empty:
+        best_tpu_network = tpu_improvement_df.loc[
+            tpu_improvement_df["energy_reduction_pct"].idxmax()
+        ]
+        rows.append({
+            "category": "TPU cube pure network",
+            "metric": "Best energy reduction",
+            "case": f"{best_tpu_network['variant']} / {best_tpu_network['case']}",
+            "value": best_tpu_network["energy_reduction_pct"],
+            "unit": "%",
+            "interpretation": "Large traffic-case model vs TPU v5p electrical torus.",
+        })
+
+    if not tpu_mapping_df.empty:
+        photonic = tpu_mapping_df[tpu_mapping_df["variant"] != "TPU cube electrical torus"]
+        if not photonic.empty:
+            best_tpu_mapping = photonic.loc[
+                photonic["energy_reduction_vs_electrical_pct"].idxmax()
+            ]
+            rows.extend([
+                {
+                    "category": "TPU cube AccelForge mapping",
+                    "metric": "Best energy reduction",
+                    "case": (
+                        f"{best_tpu_mapping['variant']} / "
+                        f"{best_tpu_mapping['workload']} / {best_tpu_mapping['scenario']}"
+                    ),
+                    "value": best_tpu_mapping["energy_reduction_vs_electrical_pct"],
+                    "unit": "%",
+                    "interpretation": "Includes fixed-point remapping after link-cost feedback.",
+                },
+                {
+                    "category": "TPU cube AccelForge mapping",
+                    "metric": "Photonic cases with new mapping signature",
+                    "case": "photonic variants vs electrical torus",
+                    "value": float(photonic["mapping_differs_from_electrical"].sum()),
+                    "unit": f"of {len(photonic)}",
+                    "interpretation": "Counts final mappings whose compact signature differs.",
+                },
+            ])
+
+    if optimal_mapping_df is not None and not optimal_mapping_df.empty:
+        changed = (
+            optimal_mapping_df[
+                optimal_mapping_df["optimal_mapping_changed_vs_baseline"].astype(bool)
+            ]
+            if "optimal_mapping_changed_vs_baseline" in optimal_mapping_df.columns
+            else pd.DataFrame()
+        )
+        if not changed.empty:
+            example = changed.iloc[0]
+            rows.append({
+                "category": "Distributed inference mapping",
+                "metric": "Architectures with changed optimal mapping",
+                "case": (
+                    f"{example['workload']} / {example['architecture']} -> "
+                    f"{example['optimal_distributed_mapping']}"
+                ),
+                "value": float(len(changed)),
+                "unit": f"of {len(optimal_mapping_df)}",
+                "interpretation": "Topology/link changes can make multicast preferable to node-to-node exchange.",
+            })
+
+    return pd.DataFrame(rows)
+
+
+def optimal_distributed_mapping_frame(
+    study_df: pd.DataFrame,
+    objective: str = "energy",
+    baseline_architecture: str | None = None,
+) -> pd.DataFrame:
+    """
+    Choose the best distributed communication mapping for each architecture.
+
+    In this project the `scenario` column doubles as a distributed inference
+    mapping choice: activation exchange (`node_to_node`), remote memory fetch
+    (`node_to_dram`), or shared-memory multicast (`shared_dram_multicast`).
+    This helper asks which choice becomes optimal after the interconnect changes.
+    """
+    if study_df.empty:
+        return pd.DataFrame()
+    metric_col = "final_energy_uJ" if objective == "energy" else "final_latency_us"
+    if metric_col not in study_df.columns:
+        raise ValueError(f"Missing objective column: {metric_col}")
+
+    df = study_df.copy()
+    if "variant" in df.columns:
+        df["architecture"] = df["variant"]
+    else:
+        df["architecture"] = df["topology"] + " / " + df["technology"]
+
+    group_cols = ["workload", "architecture"]
+    idx = df.groupby(group_cols)[metric_col].idxmin()
+    best = df.loc[idx].copy().sort_values(group_cols).reset_index(drop=True)
+    best = best.rename(columns={"scenario": "optimal_distributed_mapping"})
+
+    if baseline_architecture is not None:
+        baseline = best[best["architecture"] == baseline_architecture][
+            ["workload", "optimal_distributed_mapping", metric_col]
+        ].rename(
+            columns={
+                "optimal_distributed_mapping": "baseline_distributed_mapping",
+                metric_col: f"baseline_{metric_col}",
+            }
+        )
+        best = best.merge(baseline, on="workload", how="left")
+        best["optimal_mapping_changed_vs_baseline"] = (
+            best["optimal_distributed_mapping"] != best["baseline_distributed_mapping"]
+        )
+        best[f"{objective}_gain_vs_baseline_optimal_pct"] = 100 * (
+            1 - best[metric_col] / best[f"baseline_{metric_col}"]
+        )
+
+    keep_cols = [
+        "workload",
+        "architecture",
+        "optimal_distributed_mapping",
+        metric_col,
+    ]
+    for optional in (
+        "baseline_distributed_mapping",
+        f"baseline_{metric_col}",
+        "optimal_mapping_changed_vs_baseline",
+        f"{objective}_gain_vs_baseline_optimal_pct",
+        "final_mapping_signature",
+    ):
+        if optional in best.columns:
+            keep_cols.append(optional)
+    return best[keep_cols].reset_index(drop=True)
+
+
+def write_presentation_assets(
+    output_dir: str | Path,
+    cluster_improvement_df: pd.DataFrame,
+    tpu_improvement_df: pd.DataFrame,
+    tpu_mapping_df: pd.DataFrame,
+    optimal_mapping_df: pd.DataFrame | None = None,
+) -> dict[str, Path]:
+    """
+    Write concise, presentation-ready deliverables.
+
+    The raw CSVs remain available for auditability; this folder is intentionally
+    smaller and easier to drop into slides or a final report.
+    """
+    import matplotlib.pyplot as plt
+
+    output_dir = Path(output_dir)
+    presentation_dir = output_dir / "presentation"
+    presentation_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_df = executive_summary_frame(
+        cluster_improvement_df, tpu_improvement_df, tpu_mapping_df, optimal_mapping_df
+    )
+    paths: dict[str, Path] = {
+        "presentation_index": presentation_dir / "index.md",
+        "executive_summary": presentation_dir / "executive_summary.csv",
+        "cluster_reductions_plot": presentation_dir / "01_cluster_reductions.png",
+        "tpu_mapping_plot": presentation_dir / "02_tpu_mapping_reductions.png",
+        "topology_diagram": presentation_dir / "03_topology_diagram.png",
+    }
+    summary_df.to_csv(paths["executive_summary"], index=False)
+    if optimal_mapping_df is not None and not optimal_mapping_df.empty:
+        paths["presentation_optimal_mapping_choices"] = (
+            presentation_dir / "optimal_mapping_choices.csv"
+        )
+        optimal_mapping_df.to_csv(paths["presentation_optimal_mapping_choices"], index=False)
+
+    lines = [
+        "# Presentation Package",
+        "",
+        "This folder contains the condensed final-project deliverables for slides or a short report.",
+        "",
+        "## Files",
+        "",
+        "- `executive_summary.csv`: headline metrics and interpretations.",
+        "- `01_cluster_reductions.png`: 16-node optical-crossbar gains vs electrical mesh.",
+        "- `02_tpu_mapping_reductions.png`: TPU-cube mapping-aware gains after fixed-point re-optimization.",
+        "- `03_topology_diagram.png`: simplified topology comparison diagram.",
+        "- `optimal_mapping_choices.csv`: condensed view of which communication mapping each interconnect makes optimal.",
+        "",
+        "## Headline Metrics",
+        "",
+    ]
+    for row in summary_df.itertuples(index=False):
+        lines.append(
+            f"- **{row.category} / {row.metric}**: {row.value:.2f} {row.unit} "
+            f"for `{row.case}`. {row.interpretation}"
+        )
+    if optimal_mapping_df is not None and not optimal_mapping_df.empty:
+        lines.extend(["", "## Optimal Distributed Mapping Choices", ""])
+        for row in optimal_mapping_df.itertuples(index=False):
+            changed = getattr(row, "optimal_mapping_changed_vs_baseline", False)
+            changed_text = "changed" if changed else "same as baseline"
+            lines.append(
+                f"- `{row.workload}` / `{row.architecture}` chooses "
+                f"`{row.optimal_distributed_mapping}` ({changed_text})."
+            )
+    paths["presentation_index"].write_text("\n".join(lines) + "\n")
+
+    if not cluster_improvement_df.empty:
+        plot_df = cluster_improvement_df.sort_values(
+            "energy_reduction_pct", ascending=False
+        ).head(8)
+        labels = plot_df["workload"] + "\n" + plot_df["scenario"]
+        fig, ax = plt.subplots(figsize=(9, 4.8))
+        ax.bar(labels, plot_df["energy_reduction_pct"], color="#2B8CBE")
+        ax.set_title("Optical Crossbar vs Electrical Mesh")
+        ax.set_ylabel("Energy reduction (%)")
+        ax.tick_params(axis="x", rotation=35, labelsize=8)
+        ax.axhline(0, color="black", linewidth=0.8)
+        fig.tight_layout()
+        fig.savefig(paths["cluster_reductions_plot"], dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
+    if not tpu_mapping_df.empty:
+        photonic = tpu_mapping_df[tpu_mapping_df["variant"] != "TPU cube electrical torus"].copy()
+        if not photonic.empty:
+            photonic["label"] = (
+                photonic["variant"].str.replace("TPU cube ", "", regex=False)
+                + "\n"
+                + photonic["scenario"]
+            )
+            plot_df = photonic.sort_values(
+                "energy_reduction_vs_electrical_pct", ascending=False
+            ).head(10)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            colors = [
+                "#31A354" if changed else "#9ECAE1"
+                for changed in plot_df["mapping_differs_from_electrical"]
+            ]
+            ax.bar(plot_df["label"], plot_df["energy_reduction_vs_electrical_pct"], color=colors)
+            ax.set_title("TPU Cube: Mapping-Aware Photonic Gains")
+            ax.set_ylabel("Energy reduction vs electrical torus (%)")
+            ax.tick_params(axis="x", rotation=35, labelsize=8)
+            ax.axhline(0, color="black", linewidth=0.8)
+            fig.tight_layout()
+            fig.savefig(paths["tpu_mapping_plot"], dpi=180, bbox_inches="tight")
+            plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(9, 4.2))
+    ax.axis("off")
+    boxes = [
+        (0.08, 0.62, "Electrical 4x4 mesh\nmulti-hop, no multicast\n10 pJ/bit assumed"),
+        (0.40, 0.62, "EVK100 photonic torus\nsame cube topology\n1.9 pJ/bit reference"),
+        (0.72, 0.62, "L200/L200X/M1000\nswitched optical fabric\nsingle-hop + multicast"),
+        (0.40, 0.18, "AccelForge fixed point\nmapping -> traffic -> network cost -> remap"),
+    ]
+    for x, y, text in boxes:
+        ax.text(
+            x,
+            y,
+            text,
+            ha="center",
+            va="center",
+            bbox=dict(boxstyle="round,pad=0.45", facecolor="#F7FBFF", edgecolor="#2B8CBE"),
+            fontsize=10,
+        )
+    arrowprops = dict(arrowstyle="->", color="#636363", linewidth=1.5)
+    ax.annotate("", xy=(0.31, 0.62), xytext=(0.18, 0.62), arrowprops=arrowprops)
+    ax.annotate("", xy=(0.63, 0.62), xytext=(0.49, 0.62), arrowprops=arrowprops)
+    ax.annotate("", xy=(0.40, 0.32), xytext=(0.40, 0.52), arrowprops=arrowprops)
+    ax.set_title("Topology Path: Baseline to Photonic Mapping Study", fontsize=13, pad=12)
+    fig.tight_layout()
+    fig.savefig(paths["topology_diagram"], dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+    return paths
 
 
 # ---------------------------------------------------------------------------
@@ -1368,6 +1993,10 @@ def write_study_outputs(
     workload_names: Iterable[str] = DEFAULT_WORKLOAD_NAMES,
     scenario_names: Iterable[str] = DEFAULT_SCENARIO_NAMES,
     topology_to_tech: dict[Topology, InterconnectTech] | None = None,
+    tpu_mapping_workload_names: Iterable[str] = ("kv_attention", "prefill_projection"),
+    tpu_mapping_scenario_names: Iterable[str] = DEFAULT_SCENARIO_NAMES,
+    tpu_mapping_max_iterations: int = 4,
+    include_presentation_assets: bool = True,
 ) -> dict[str, Path]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1377,9 +2006,34 @@ def write_study_outputs(
     cluster_improvements = cluster_improvement_frame(cluster_df)
     tpu_df = tpu_cube_case_study()
     tpu_improvements = tpu_improvement_frame(tpu_df)
+    tpu_mapping_df = tpu_cube_mapping_study(
+        workload_names=tpu_mapping_workload_names,
+        scenario_names=tpu_mapping_scenario_names,
+        max_iterations=tpu_mapping_max_iterations,
+    )
+    cluster_optimal = optimal_distributed_mapping_frame(
+        cluster_df,
+        baseline_architecture=f"{Mesh2DTopology(4, 4).name} / {ELECTRICAL_800G.name}",
+    )
+    if not cluster_optimal.empty:
+        cluster_optimal.insert(0, "study", "16-node cluster")
+    tpu_optimal = optimal_distributed_mapping_frame(
+        tpu_mapping_df,
+        baseline_architecture="TPU cube electrical torus",
+    )
+    if not tpu_optimal.empty:
+        tpu_optimal.insert(0, "study", "TPU cube mapping")
+    optimal_mapping_df = pd.concat(
+        [cluster_optimal, tpu_optimal], ignore_index=True
+    )
     sources_df = source_frame()
     summary_md = generate_summary_markdown(
-        cluster_df, cluster_improvements, tpu_df, tpu_improvements
+        cluster_df,
+        cluster_improvements,
+        tpu_df,
+        tpu_improvements,
+        tpu_mapping_df,
+        optimal_mapping_df,
     )
 
     paths: dict[str, Path] = {
@@ -1387,6 +2041,8 @@ def write_study_outputs(
         "cluster_improvements": output_dir / "cluster_improvements.csv",
         "tpu_cube_case_study": output_dir / "tpu_cube_case_study.csv",
         "tpu_improvements": output_dir / "tpu_improvements.csv",
+        "tpu_mapping_study": output_dir / "tpu_mapping_study.csv",
+        "optimal_mapping_choices": output_dir / "optimal_mapping_choices.csv",
         "sources": output_dir / "sources.csv",
         "summary": output_dir / "summary.md",
     }
@@ -1394,8 +2050,20 @@ def write_study_outputs(
     cluster_improvements.to_csv(paths["cluster_improvements"], index=False)
     tpu_df.to_csv(paths["tpu_cube_case_study"], index=False)
     tpu_improvements.to_csv(paths["tpu_improvements"], index=False)
+    tpu_mapping_df.to_csv(paths["tpu_mapping_study"], index=False)
+    optimal_mapping_df.to_csv(paths["optimal_mapping_choices"], index=False)
     sources_df.to_csv(paths["sources"], index=False)
     paths["summary"].write_text(summary_md)
+    if include_presentation_assets:
+        paths.update(
+            write_presentation_assets(
+                output_dir,
+                cluster_improvements,
+                tpu_improvements,
+                tpu_mapping_df,
+                optimal_mapping_df,
+            )
+        )
     return paths
 
 
@@ -1417,7 +2085,7 @@ def main(argv: list[str] | None = None) -> int:
         "command",
         nargs="?",
         default="all",
-        choices=("all", "cluster", "tpu", "sources", "tech"),
+        choices=("all", "cluster", "tpu", "tpu-mapping", "sources", "tech"),
         help="Artifact set to generate.",
     )
     parser.add_argument(
@@ -1452,12 +2120,27 @@ def main(argv: list[str] | None = None) -> int:
         output_dir.mkdir(parents=True, exist_ok=True)
         tpu_df = tpu_cube_case_study()
         tpu_improvements = tpu_improvement_frame(tpu_df)
+        tpu_mapping_df = tpu_cube_mapping_study()
         tpu_path = output_dir / "tpu_cube_case_study.csv"
         imp_path = output_dir / "tpu_improvements.csv"
+        mapping_path = output_dir / "tpu_mapping_study.csv"
         tpu_df.to_csv(tpu_path, index=False)
         tpu_improvements.to_csv(imp_path, index=False)
+        tpu_mapping_df.to_csv(mapping_path, index=False)
         print(f"tpu_cube_case_study: {tpu_path}")
         print(f"tpu_improvements: {imp_path}")
+        print(f"tpu_mapping_study: {mapping_path}")
+        return 0
+
+    if args.command == "tpu-mapping":
+        output_dir.mkdir(parents=True, exist_ok=True)
+        tpu_mapping_df = tpu_cube_mapping_study(
+            workload_names=_csv_arg(args.workloads, ("kv_attention",)),
+            scenario_names=_csv_arg(args.scenarios, DEFAULT_SCENARIO_NAMES),
+        )
+        mapping_path = output_dir / "tpu_mapping_study.csv"
+        tpu_mapping_df.to_csv(mapping_path, index=False)
+        print(f"tpu_mapping_study: {mapping_path}")
         return 0
 
     if args.command == "sources":

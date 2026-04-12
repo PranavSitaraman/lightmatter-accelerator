@@ -47,13 +47,19 @@ from scripts.lightmatter_interconnects import (
     solve_iteratively,
     history_to_frame,
     per_component_energy_frame,
+    mapping_feature_dict,
+    mapping_features_frame,
+    mapping_signature,
     compare_topologies,
     cluster_improvement_frame,
     tpu_cube_case_study,
     tpu_improvement_frame,
+    tpu_cube_mapping_study,
+    optimal_distributed_mapping_frame,
     all_technologies_network_comparison,
     bandwidth_sensitivity_network,
     energy_per_bit_sensitivity_network,
+    executive_summary_frame,
     write_study_outputs,
     generate_summary_markdown,
     # Constants
@@ -77,10 +83,10 @@ class TestTechnologyCatalog(unittest.TestCase):
             self.assertIn(key, ALL_LIGHTMATTER_TECHS, f"Missing {key} in ALL_LIGHTMATTER_TECHS")
 
     def test_evk100_energy_is_1p9_pJ_per_bit(self):
-        """EVK100 ISES Korea 2025 spec: 1.9 pJ/bit (not the old 3.2 pJ/bit)."""
+        """EVK100 optimistic/reference point: 1.9 pJ/bit, with 3.2 pJ/bit kept as conservative sensitivity context."""
         self.assertAlmostEqual(
             LIGHTMATTER_EVK100.energy_per_bit_j * 1e12, 1.9, places=3,
-            msg="EVK100 energy should be 1.9 pJ/bit per ISES Korea 2025"
+            msg="EVK100 reference energy should be 1.9 pJ/bit"
         )
 
     def test_evk50_energy_is_4p6_pJ_per_bit(self):
@@ -385,7 +391,10 @@ class TestIterativeSolver(unittest.TestCase):
             max_iterations=2,
         )
         df = history_to_frame(history)
-        for col in ("iteration", "total_energy_uJ", "total_latency_us", "network_energy_uJ"):
+        for col in (
+            "iteration", "total_energy_uJ", "total_latency_us",
+            "network_energy_uJ", "mapping_signature", "spatial_NodeX_usage",
+        ):
             self.assertIn(col, df.columns)
 
     def test_per_component_energy_frame(self):
@@ -400,6 +409,33 @@ class TestIterativeSolver(unittest.TestCase):
         self.assertIsInstance(df, pd.DataFrame)
         # MAC component must appear (it drives the computation)
         self.assertIn("MAC", df["component"].values)
+
+    def test_mapping_signature_is_compact_and_tidy(self):
+        _, mapping = solve_iteratively(
+            self.SMALL_WORKLOAD,
+            scenario_case("node_to_dram"),
+            OpticalCrossbarTopology(),
+            LIGHTMATTER_EVK100,
+            max_iterations=1,
+        )
+        signature = mapping_signature(mapping)
+        features = mapping_feature_dict(mapping)
+        feature_df = mapping_features_frame(mapping)
+        self.assertIsInstance(signature, str)
+        self.assertLess(len(signature), 1200)
+        self.assertIn("spatial::NodeArray::NodeX", features)
+        self.assertIn("kind", feature_df.columns)
+
+    def test_solve_iteratively_supports_tpu_cube_node_z(self):
+        history, _ = solve_iteratively(
+            self.SMALL_WORKLOAD,
+            scenario_case("node_to_dram", active_nodes=8),
+            Torus3DTopology(2, 2, 2),
+            ELECTRICAL_800G,
+            max_iterations=1,
+            node_shape=(2, 2, 2),
+        )
+        self.assertIn("spatial::NodeArray::NodeZ", history[0].mapping_features)
 
     def test_optical_converges_faster_than_electrical_for_dram_scenario(self):
         """
@@ -437,6 +473,9 @@ class TestArtifactWriter(unittest.TestCase):
                 tmpdir,
                 workload_names=("kv_attention",),
                 scenario_names=("node_to_dram",),
+                tpu_mapping_workload_names=("kv_attention",),
+                tpu_mapping_scenario_names=("node_to_dram",),
+                tpu_mapping_max_iterations=1,
             )
             for key, path in paths.items():
                 self.assertTrue(Path(path).exists(), f"Expected file missing: {key} ({path})")
@@ -447,10 +486,14 @@ class TestArtifactWriter(unittest.TestCase):
                 tmpdir,
                 workload_names=("kv_attention",),
                 scenario_names=("node_to_dram",),
+                tpu_mapping_workload_names=("kv_attention",),
+                tpu_mapping_scenario_names=("node_to_dram",),
+                tpu_mapping_max_iterations=1,
             )
             df = pd.read_csv(paths["cluster_study"])
             for col in ("workload", "scenario", "topology", "final_energy_uJ",
-                        "network_delta_energy_pct", "mapping_sensitivity_energy_pct"):
+                        "network_delta_energy_pct", "mapping_sensitivity_energy_pct",
+                        "final_mapping_signature", "mapping_changed"):
                 self.assertIn(col, df.columns)
 
     def test_cluster_improvements_energy_positive_for_optical(self):
@@ -459,6 +502,9 @@ class TestArtifactWriter(unittest.TestCase):
                 tmpdir,
                 workload_names=("decode_mlp",),
                 scenario_names=("node_to_dram",),
+                tpu_mapping_workload_names=("kv_attention",),
+                tpu_mapping_scenario_names=("node_to_dram",),
+                tpu_mapping_max_iterations=1,
             )
             cluster_df = pd.read_csv(paths["cluster_study"])
             improvements = cluster_improvement_frame(cluster_df)
@@ -470,10 +516,15 @@ class TestArtifactWriter(unittest.TestCase):
                 tmpdir,
                 workload_names=("kv_attention",),
                 scenario_names=("node_to_dram",),
+                tpu_mapping_workload_names=("kv_attention",),
+                tpu_mapping_scenario_names=("node_to_dram",),
+                tpu_mapping_max_iterations=1,
             )
             summary = Path(paths["summary"]).read_text()
             self.assertIn("EVK100", summary)
             self.assertIn("M1000", summary)
+            self.assertIn("TPU Cube Mapping Adaptation", summary)
+            self.assertIn("Optimal Distributed Mapping Choices", summary)
 
     def test_tpu_case_study_has_five_variants(self):
         tpu_df = tpu_cube_case_study()
@@ -497,6 +548,58 @@ class TestArtifactWriter(unittest.TestCase):
             m1000_rows["effective_link_one_way_tbps"].max(),
             other_rows["effective_link_one_way_tbps"].max(),
         )
+
+    def test_tpu_cube_mapping_study_reports_mapping_signatures(self):
+        df = tpu_cube_mapping_study(
+            workload_names=("kv_attention",),
+            scenario_names=("node_to_dram",),
+            max_iterations=1,
+            node_shape=(2, 2, 2),
+            hbm_gib=8,
+        )
+        self.assertGreaterEqual(len(df), 5)
+        for col in (
+            "variant", "final_mapping_signature",
+            "energy_reduction_vs_electrical_pct",
+            "mapping_differs_from_electrical",
+            "spatial_NodeZ_usage",
+        ):
+            self.assertIn(col, df.columns)
+
+    def test_executive_summary_frame_contains_headline_metrics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = write_study_outputs(
+                tmpdir,
+                workload_names=("kv_attention",),
+                scenario_names=("node_to_dram",),
+                tpu_mapping_workload_names=("kv_attention",),
+                tpu_mapping_scenario_names=("node_to_dram",),
+                tpu_mapping_max_iterations=1,
+            )
+            cluster_imp = pd.read_csv(paths["cluster_improvements"])
+            tpu_imp = pd.read_csv(paths["tpu_improvements"])
+            tpu_mapping = pd.read_csv(paths["tpu_mapping_study"])
+            summary = executive_summary_frame(cluster_imp, tpu_imp, tpu_mapping)
+            self.assertFalse(summary.empty)
+            self.assertTrue(Path(paths["presentation_index"]).exists())
+            self.assertTrue(Path(paths["executive_summary"]).exists())
+            self.assertTrue(Path(paths["optimal_mapping_choices"]).exists())
+
+    def test_optimal_distributed_mapping_frame_detects_candidate_choices(self):
+        df = pd.DataFrame([
+            {"workload": "w", "variant": "base", "scenario": "node_to_node",
+             "final_energy_uJ": 10.0, "final_latency_us": 10.0},
+            {"workload": "w", "variant": "base", "scenario": "node_to_dram",
+             "final_energy_uJ": 20.0, "final_latency_us": 20.0},
+            {"workload": "w", "variant": "opt", "scenario": "node_to_node",
+             "final_energy_uJ": 12.0, "final_latency_us": 12.0},
+            {"workload": "w", "variant": "opt", "scenario": "shared_dram_multicast",
+             "final_energy_uJ": 5.0, "final_latency_us": 5.0},
+        ])
+        choices = optimal_distributed_mapping_frame(df, baseline_architecture="base")
+        opt_row = choices[choices["architecture"] == "opt"].iloc[0]
+        self.assertEqual(opt_row["optimal_distributed_mapping"], "shared_dram_multicast")
+        self.assertTrue(opt_row["optimal_mapping_changed_vs_baseline"])
 
 
 # =========================================================================

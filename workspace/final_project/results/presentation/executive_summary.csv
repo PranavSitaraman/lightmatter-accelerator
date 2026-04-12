@@ -1,0 +1,7 @@
+category,metric,case,value,unit,interpretation
+16-node AccelForge cluster,Best energy reduction,decode_mlp / shared_dram_multicast,72.21458489717747,%,Optical crossbar vs electrical 4x4 mesh.
+16-node AccelForge cluster,Best latency reduction,kv_attention / shared_dram_multicast,97.57160872737404,%,Network-aware fixed-point mapping result.
+TPU cube pure network,Best energy reduction,Photonic switched fabric (M1000) / shared_weight_multicast,99.91015625,%,Large traffic-case model vs TPU v5p electrical torus.
+TPU cube AccelForge mapping,Best energy reduction,TPU cube M1000 switched fabric / kv_attention / shared_dram_multicast,77.70242755145657,%,Includes fixed-point remapping after link-cost feedback.
+TPU cube AccelForge mapping,Photonic cases with new mapping signature,photonic variants vs electrical torus,0.0,of 24,Counts final mappings whose compact signature differs.
+Distributed inference mapping,Architectures with changed optimal mapping,prefill_projection / Lightmatter Optical Crossbar / Lightmatter EVK100 -> shared_dram_multicast,5.0,of 16,Topology/link changes can make multicast preferable to node-to-node exchange.

@@ -8,15 +8,15 @@ run-in-docker = docker run --rm -v "$(CURDIR):/home/workspace" -w $(PROJECT_DIR)
 # Run tests, generate study outputs, then execute the notebook.
 all: test study notebook
 
-# Generate all CSV and Markdown outputs.
+# Generate all CSV, Markdown, and presentation-ready outputs.
 study:
 	$(call run-in-docker,'python3 scripts/lightmatter_interconnects.py all --output-dir results')
 
-# Regenerate and execute the notebook (30-minute timeout).
+# Regenerate and execute the notebook (40-minute timeout).
 notebook:
-	$(call run-in-docker,'python3 scripts/generate_lightmatter_notebook.py --output 4_lightmatter_interconnects.ipynb && jupyter nbconvert --to notebook --execute --inplace 4_lightmatter_interconnects.ipynb --ExecutePreprocessor.timeout=1800')
+	$(call run-in-docker,'python3 scripts/generate_lightmatter_notebook.py --output 4_lightmatter_interconnects.ipynb && jupyter nbconvert --to notebook --execute --inplace 4_lightmatter_interconnects.ipynb --ExecutePreprocessor.timeout=2400')
 
-# Run the full 52-test suite.
+# Run the full 57-test suite.
 test:
 	$(call run-in-docker,'python3 -m unittest discover -s tests -v')
 
