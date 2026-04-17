@@ -1,0 +1,10 @@
+active_nodes,scenario,architecture,topology,technology,energy_uJ_per_chip,latency_us_per_chip,chiplet_energy_uJ_per_chip,chiplet_latency_us_per_chip,energy_reduction_vs_chiplet_pct,latency_reduction_vs_chiplet_pct
+64,all_to_all_activation,Advanced chiplet torus,4x4x4 3D Torus,Advanced chiplet 3.5T,314146.1793645714,19634.148400761904,314146.1793645714,19634.148400761904,0.0,0.0
+64,all_to_all_activation,EVK100 photonic torus,4x4x4 3D Torus,Lightmatter EVK100,99479.62346544761,21474.845622857138,314146.1793645714,19634.148400761904,68.33333333333333,-9.374978657204224
+64,all_to_all_activation,M1000 optical switched fabric,Lightmatter Optical Crossbar,Lightmatter M1000,39513.6991232,299.8281969284468,314146.1793645714,19634.148400761904,87.421875,98.47292487146113
+64,remote_weight_refill,Advanced chiplet torus,4x4x4 3D Torus,Advanced chiplet 3.5T,206158.430208,9817.076105142856,206158.430208,9817.076105142856,0.0,0.0
+64,remote_weight_refill,EVK100 photonic torus,4x4x4 3D Torus,Lightmatter EVK100,65283.5028992,10737.424239999998,206158.430208,9817.076105142856,68.33333333333333,-9.374971987586012
+64,remote_weight_refill,M1000 optical switched fabric,Lightmatter Optical Crossbar,Lightmatter M1000,19756.8495616,149.9140984642234,206158.430208,9817.076105142856,90.41666666666667,98.47292516775246
+64,shared_state_multicast,Advanced chiplet torus,4x4x4 3D Torus,Advanced chiplet 3.5T,13194139.533312,628292.3667291428,13194139.533312,628292.3667291428,0.0,0.0
+64,shared_state_multicast,EVK100 photonic torus,4x4x4 3D Torus,Lightmatter EVK100,65283.5028992,10737.424239999998,13194139.533312,628292.3667291428,99.50520833333333,98.29101469179095
+64,shared_state_multicast,M1000 optical switched fabric,Lightmatter Optical Crossbar,Lightmatter M1000,19756.8495616,149.9140984642234,13194139.533312,628292.3667291428,99.85026041666667,99.97613943660582

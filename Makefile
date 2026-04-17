@@ -1,7 +1,9 @@
 DOCKER_IMAGE ?= timeloopaccelergy/accelforge:latest-amd64
 PROJECT_DIR := /home/workspace/workspace/final_project
+HOST_UID := $(shell id -u)
+HOST_GID := $(shell id -g)
 
-run-in-docker = docker run --rm -v "$(CURDIR):/home/workspace" -w $(PROJECT_DIR) $(DOCKER_IMAGE) bash -lc
+run-in-docker = docker run --rm --user "$(HOST_UID):$(HOST_GID)" -v "$(CURDIR):/home/workspace" -w $(PROJECT_DIR) $(DOCKER_IMAGE) bash -lc $(1)
 
 .PHONY: all study notebook test clean-results
 
@@ -16,7 +18,7 @@ study:
 notebook:
 	$(call run-in-docker,'python3 scripts/generate_lightmatter_notebook.py --output 4_lightmatter_interconnects.ipynb && jupyter nbconvert --to notebook --execute --inplace 4_lightmatter_interconnects.ipynb --ExecutePreprocessor.timeout=2400')
 
-# Run the full 57-test suite.
+# Run the full 68-test suite.
 test:
 	$(call run-in-docker,'python3 -m unittest discover -s tests -v')
 

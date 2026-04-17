@@ -25,6 +25,7 @@ from scripts.generate_lightmatter_notebook import build_notebook
 from scripts.lightmatter_interconnects import (
     # Technology catalog
     ELECTRICAL_800G,
+    ADVANCED_CHIPLET_3P5T,
     LIGHTMATTER_EVK50,
     LIGHTMATTER_EVK100,
     LIGHTMATTER_L200,
@@ -56,6 +57,17 @@ from scripts.lightmatter_interconnects import (
     tpu_improvement_frame,
     tpu_cube_mapping_study,
     optimal_distributed_mapping_frame,
+    compiler_strategy_study,
+    optimal_compiler_strategy_frame,
+    scaling_law_study,
+    scaling_exponent_frame,
+    chiplet_comparison_frame,
+    gemini_proxy_models,
+    default_superpod_configs,
+    superpod_stage_study,
+    superpod_end_to_end_summary,
+    superpod_ablation_frame,
+    superpod_context_scaling_study,
     all_technologies_network_comparison,
     bandwidth_sensitivity_network,
     energy_per_bit_sensitivity_network,
@@ -67,6 +79,8 @@ from scripts.lightmatter_interconnects import (
     LLM_WORKLOADS,
     IRONWOOD_TFLOPS_PER_CHIP,
     IRONWOOD_HBM_BANDWIDTH_TBPS,
+    IRONWOOD_SUPERPOD_CHIPS,
+    IRONWOOD_SUPERPOD_CUBES,
     TPU_V5P_ICI_BIDIR_GBPS,
 )
 
@@ -113,6 +127,27 @@ class TestTechnologyCatalog(unittest.TestCase):
 
     def test_electrical_does_not_support_multicast(self):
         self.assertFalse(ELECTRICAL_800G.supports_multicast)
+
+    def test_advanced_chiplet_baseline_matches_prompt(self):
+        self.assertAlmostEqual(ADVANCED_CHIPLET_3P5T.link_bandwidth_bps / 1e12, 3.5)
+        self.assertAlmostEqual(ADVANCED_CHIPLET_3P5T.energy_per_bit_j * 1e12, 6.0)
+        self.assertFalse(ADVANCED_CHIPLET_3P5T.supports_multicast)
+
+    def test_gemini_proxy_models_are_explicit_assumptions(self):
+        models = gemini_proxy_models()
+        self.assertIn("gemini3_1_pro_moe_proxy", models)
+        pro = models["gemini3_1_pro_moe_proxy"]
+        self.assertGreater(pro.total_params_b, pro.active_params_b)
+        self.assertIn("not a disclosed", pro.disclosure_note)
+
+    def test_default_superpod_configs_include_full_stack(self):
+        configs = default_superpod_configs()
+        names = {config.name for config in configs}
+        self.assertIn("M1000 full photonic compiler stack", names)
+        full = [config for config in configs if config.name == "M1000 full photonic compiler stack"][0]
+        baseline = [config for config in configs if config.name == "Ironwood electrical torus + XLA SPMD"][0]
+        self.assertGreater(full.compute_efficiency, baseline.compute_efficiency)
+        self.assertEqual(full.active_chips, IRONWOOD_SUPERPOD_CHIPS)
 
     def test_evk100_faster_than_electrical(self):
         self.assertGreater(
@@ -312,9 +347,62 @@ class TestSweepFunctions(unittest.TestCase):
             scenario_name="node_to_dram",
             active_nodes=4,
         )
-        expected = {"Electrical 800G", "EVK50", "EVK100", "L200", "L200X", "M1000"}
+        expected = {
+            "Electrical 800G", "Advanced Chiplet 3.5T",
+            "EVK50", "EVK100", "L200", "L200X", "M1000",
+        }
         found = set(df["technology"])
         self.assertEqual(found, expected)
+
+    def test_compiler_strategy_study_changes_strategy_for_photonics(self):
+        strategy_df = compiler_strategy_study(
+            workload_names=("prefill_projection",),
+            active_nodes=64,
+        )
+        best = optimal_compiler_strategy_frame(strategy_df)
+        photonic = best[best["architecture"] == "M1000 optical switched fabric"].iloc[0]
+        electrical = best[best["architecture"] == "TPU electrical torus"].iloc[0]
+        self.assertNotEqual(photonic["strategy"], electrical["strategy"])
+        self.assertTrue(photonic["strategy_changed_vs_baseline"])
+
+    def test_scaling_law_optical_multicast_scales_better_than_chiplet(self):
+        scaling = scaling_law_study(node_counts=(64, 512, 4096), traffic_gib_per_chip=0.01)
+        exponents = scaling_exponent_frame(scaling)
+        multicast_energy = exponents[
+            (exponents["scenario"] == "shared_state_multicast")
+            & (exponents["metric"] == "energy_uJ_per_chip")
+        ].set_index("architecture")
+        self.assertLess(
+            multicast_energy.loc["M1000 optical switched fabric", "scaling_exponent"],
+            multicast_energy.loc["Advanced chiplet torus", "scaling_exponent"],
+        )
+
+    def test_chiplet_comparison_includes_photonic_reductions(self):
+        df = chiplet_comparison_frame(active_nodes=64, traffic_gib_per_chip=0.01)
+        m1000 = df[df["architecture"] == "M1000 optical switched fabric"]
+        self.assertTrue((m1000["energy_reduction_vs_chiplet_pct"] > 0).any())
+
+    def test_superpod_summary_reports_training_and_inference_speedups(self):
+        stage_df = superpod_stage_study(model_names=("gemini3_1_pro_moe_proxy",))
+        summary = superpod_end_to_end_summary(stage_df)
+        full_stack = summary[
+            summary["configuration"] == "M1000 full photonic compiler stack"
+        ]
+        self.assertEqual(set(full_stack["phase"]), {"training", "inference"})
+        self.assertTrue((full_stack["speedup_vs_baseline"] > 1.0).all())
+
+    def test_superpod_ablation_assigns_incremental_techniques(self):
+        stage_df = superpod_stage_study(model_names=("gemini3_1_pro_moe_proxy",))
+        summary = superpod_end_to_end_summary(stage_df)
+        ablation = superpod_ablation_frame(summary)
+        self.assertIn("full photonic compiler stack", set(ablation["technique"]))
+        full_stack = ablation[ablation["technique"] == "full photonic compiler stack"]
+        self.assertTrue((full_stack["speedup_increment_vs_previous"] > 1.0).all())
+
+    def test_superpod_context_scaling_full_photonic_beats_electrical(self):
+        df = superpod_context_scaling_study(context_tokens=(4096, 32768), output_tokens=128)
+        full_stack = df[df["configuration"] == "M1000 full photonic compiler stack"]
+        self.assertTrue((full_stack["speedup_vs_baseline"] > 1.0).all())
 
 
 # =========================================================================
@@ -327,7 +415,8 @@ class TestSourceFrame(unittest.TestCase):
         df = source_frame()
         source_ids = set(df["source"])
         for required in ("lightmatter_evk100", "lightmatter_evk50", "tpu_v5p",
-                         "tpu_rack_hotchips", "lightmatter_m1000"):
+                         "tpu_rack_hotchips", "lightmatter_m1000", "tpu7x",
+                         "gemini_3", "gemini_3_1_release_notes"):
             self.assertIn(required, source_ids, f"Missing source: {required}")
 
     def test_all_urls_start_with_https(self):
@@ -525,6 +614,7 @@ class TestArtifactWriter(unittest.TestCase):
             self.assertIn("M1000", summary)
             self.assertIn("TPU Cube Mapping Adaptation", summary)
             self.assertIn("Optimal Distributed Mapping Choices", summary)
+            self.assertIn("Full-Superpod Gemini-Class", summary)
 
     def test_tpu_case_study_has_five_variants(self):
         tpu_df = tpu_cube_case_study()
@@ -584,6 +674,8 @@ class TestArtifactWriter(unittest.TestCase):
             self.assertTrue(Path(paths["presentation_index"]).exists())
             self.assertTrue(Path(paths["executive_summary"]).exists())
             self.assertTrue(Path(paths["optimal_mapping_choices"]).exists())
+            self.assertTrue(Path(paths["superpod_end_to_end_summary"]).exists())
+            self.assertTrue(Path(paths["superpod_context_scaling"]).exists())
 
     def test_optimal_distributed_mapping_frame_detects_candidate_choices(self):
         df = pd.DataFrame([
@@ -647,6 +739,14 @@ class TestNotebookBuilder(unittest.TestCase):
         for tech in ("LIGHTMATTER_EVK50", "LIGHTMATTER_L200X", "LIGHTMATTER_M1000"):
             self.assertIn(tech, code_cells, f"Notebook code should import {tech}")
 
+    def test_notebook_has_superpod_section(self):
+        nb = build_notebook()
+        md_cells = [c.source for c in nb.cells if c.cell_type == "markdown"]
+        self.assertTrue(
+            any("Full Superpod" in s or "Gemini-Class" in s for s in md_cells),
+            "Notebook should have a full-superpod Gemini-class section"
+        )
+
 
 # =========================================================================
 # Constants sanity checks
@@ -667,6 +767,10 @@ class TestConstants(unittest.TestCase):
 
     def test_tpu_v5p_ici_bidir_gbps_correct(self):
         self.assertAlmostEqual(TPU_V5P_ICI_BIDIR_GBPS, 1200.0, places=0)
+
+    def test_ironwood_superpod_size(self):
+        self.assertEqual(IRONWOOD_SUPERPOD_CHIPS, 9216)
+        self.assertEqual(IRONWOOD_SUPERPOD_CUBES, 144)
 
     def test_all_workloads_defined(self):
         expected = {

@@ -28,22 +28,42 @@ A Lightmatter Passage Case Study on TPU-Class Clusters}
 \section{Project Overview}
 This project is based on the AccelForge cluster-mapping example and extends it
 with a topology-aware photonic interconnect model calibrated against the
-publicly disclosed Lightmatter Passage family (EVK50, EVK100, L200/L200X, M1000).
+publicly disclosed Lightmatter Passage family (EVK50, EVK100, L200/L200X,
+M1000). Google's Ironwood TPU stack already deploys Optical Circuit Switches
+(OCS) \emph{between cubes} to compose pods and 9{,}216-chip superpods; this
+project asks the complementary question of what changes when photonics
+penetrates the \emph{intra-cube} ICI layer that is electrical today.
 
 \textbf{Problem and motivation.}
-In today's accelerator clusters (e.g.\ TPU v5p's 4$\times$4$\times$4 cube and the
-recently disclosed Ironwood rack), inter-chip interconnect (ICI) is increasingly
-the dominant cost for distributed inference of large language models. Electrical
-800G links consume on the order of 10~pJ/bit and scale poorly in 3D torus
-topologies for traffic patterns such as shared-weight multicast and remote HBM
-fetch. Lightmatter's Passage family claims 1.9--4.8~pJ/bit at per-fiber
-bandwidths up to 57.3~Tbps, and critically supports \emph{native optical
-multicast} and (for M1000) an integrated optical circuit switch.
-If these links materialize, the cost model that every accelerator mapper
-implicitly assumes --- nearest-neighbor traffic is cheap, remote traffic is
-expensive --- may no longer hold, and mappers that do not know about the
-interconnect technology will leave large amounts of energy and latency on the
-table.
+In today's accelerator clusters (e.g.\ TPU v5p's 4$\times$4$\times$4 cube and
+the Ironwood 64-chip cube that forms the pod building block), the intra-cube
+inter-chip interconnect (ICI) is electrical, while the inter-cube layer has
+already shifted to OCS-based optics. Electrical 800G ICI links consume on the
+order of 10~pJ/bit and scale poorly in 3D torus topologies for traffic
+patterns such as shared-weight multicast and remote HBM fetch. Lightmatter's
+Passage family claims 1.9--4.8~pJ/bit at per-fiber bandwidths up to
+57.3~Tbps, and critically supports \emph{native optical multicast} and
+(for M1000) an integrated solid-state OCS. If these links materialize at the
+intra-cube layer, the cost model that every accelerator mapper implicitly
+assumes --- nearest-neighbor traffic is cheap, remote traffic is expensive
+--- may no longer hold, and mappers that do not know about the interconnect
+technology will leave large amounts of energy and latency on the table.
+
+\textbf{The shared-memory lens.}
+An Ironwood superpod presents 1.77~PB of ``directly accessible HBM'' to
+software, but physically that memory is distributed 192~GiB per chip across
+9{,}216 chips; the illusion of shared memory is realized by RDMA over ICI,
+with no hardware cache coherence across chips. The AccelForge distributed
+mapping choices studied here (\texttt{node\_to\_node},
+\texttt{node\_to\_dram}, \texttt{shared\_dram\_multicast}) are literally
+different RDMA traffic patterns against this distributed pool. Whether the
+``shared memory'' abstraction remains economical at cube scale therefore
+depends directly on the pJ/bit and bandwidth of the interconnect beneath it:
+today the ratio between a local HBM access ($\sim$7~pJ/bit) and a remote HBM
+access ($\sim$10~pJ/bit \emph{per ICI hop}, potentially multiple hops on an
+electrical torus) forces the compiler to keep accesses local wherever it
+can. Photonic intra-cube ICI compresses that ratio by roughly an order of
+magnitude --- which is the lever this project studies.
 
 \textbf{Key questions.}
 \begin{itemize}
@@ -61,17 +81,23 @@ table.
 \end{itemize}
 
 \textbf{Hypothesis.}
-We expect that photonic links with native multicast will dramatically reduce
-energy and latency for traffic patterns whose critical path leaves the local
-HBM bank --- specifically shared-DRAM multicast and node-to-DRAM --- because
-these patterns pay the electrical cost multiple times on a mesh or torus but
-pay it once on a multicast-capable optical fabric. We expect node-to-node
-patterns with good locality to improve only marginally, because nearest-neighbor
-electrical links are already well matched to that traffic. Most importantly,
-we hypothesize that for at least some workloads the optimal distributed
-mapping will \emph{flip} under photonic interconnect (e.g.\ from
-\texttt{node\_to\_node} to \texttt{shared\_dram\_multicast}), demonstrating
-that an interconnect-agnostic mapper is strictly suboptimal once photonics are
+Our central hypothesis is that photonic intra-cube ICI compresses the cost
+ratio between local and remote HBM access, and that this ratio shift
+--- not the raw pJ/bit reduction --- is what drives qualitative change in the
+mapper's behavior. Concretely, we expect that photonic links with native
+multicast will dramatically reduce energy and latency for traffic patterns
+whose critical path leaves the local HBM bank (shared-DRAM multicast and
+node-to-DRAM), because these patterns pay the electrical cost multiple times
+on a torus but pay it once on a multicast-capable optical fabric. We expect
+node-to-node patterns with good locality to improve only marginally, because
+nearest-neighbor electrical links are already well matched to that traffic.
+Most importantly, we hypothesize that for at least some workloads the optimal
+distributed mapping will \emph{flip} under photonic interconnect
+(e.g.\ from \texttt{node\_to\_node} to \texttt{shared\_dram\_multicast}),
+because once remote HBM is nearly as cheap as local HBM the mapper should
+prefer to amortize weights via multicast rather than to replicate them across
+node-local banks. A flip under photonics demonstrates that an
+interconnect-agnostic mapper is strictly suboptimal once photonics is
 introduced --- motivating future work on a photonic-aware compiler.
 
 
@@ -84,7 +110,12 @@ exists for electrical ICI (e.g.\ TPU v4/v5p 3D-torus analyses in the course
 readings) and separately there is a growing body of public material on
 co-packaged optics from Lightmatter, Ayar Labs, and the OCP CPO reference
 architecture, but the two have not been tied together in a mapper-visible way
-for a TPU-class cluster.
+for a TPU-class cluster. Notably, Google has already deployed optical-circuit
+switching \emph{between} cubes in Ironwood --- meaning the photonic primitive
+itself is not hypothetical --- but the intra-cube ICI remains electrical, and
+the AccelForge mapper has no knowledge of which layer is optical versus
+electrical. This project fills that gap: it makes the interconnect technology
+descriptor a first-class input to the mapper.
 
 \textbf{Our approach.}
 We add a \emph{topology-aware network cost model} to AccelForge's iterative

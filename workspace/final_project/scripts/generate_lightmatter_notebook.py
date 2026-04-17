@@ -77,7 +77,7 @@ analyze the resulting architecture.
     cells.append(md(
         """## Research Basis
 
-All specifications below were verified against public sources as of **April 12, 2026**.
+All specifications below were verified against public sources as of **April 17, 2026**.
 
 | Source | Key Numbers |
 |---|---|
@@ -89,11 +89,14 @@ All specifications below were verified against public sources as of **April 12, 
 | Lightmatter OCP announcement (Mar 2026) | Open CPO reference architecture initiative |
 | Lightmatter world-record press release (Mar 2026) | **1.6 Tbps/fiber** at 112G PAM4 |
 | Google Cloud TPU v5p docs | **1200 GB/s** bidirectional ICI/chip, 4×4×4 torus |
+| Google Cloud TPU7x docs | Ironwood/TPU7x: **9216 chips**, **2307 BF16 / 4614 FP8 TFLOP/s/chip**, **192 GiB HBM/chip**, **1200 GB/s ICI/chip** |
+| Google Gemini 3 / 3.1 public posts | Latest Gemini family is public, but parameter counts and expert layouts are **not disclosed** |
 | HotChips 2025 TPU rack tutorial | Ironwood: **4614 TFLOPS**, 7.4 TBps HBM, 6 cube faces × 16 links each |
 
 Two modeling assumptions are **not** publicly disclosed and are treated as explicit assumptions:
 - Electrical-link dynamic energy: **10 pJ/bit**
 - Per-hop router latency: **5 ns** (electrical) / **1–2.5 ns** (optical)
+- Gemini 3/3.1 architecture: modeled with explicit dense/MoE public proxy workloads, not confidential Google internals
 
 These are intentionally conservative and easy to change in `scripts/lightmatter_interconnects.py`.
 EVK100 energy is the one intentional optimistic/reference value: public Lightmatter pages expose
@@ -120,6 +123,7 @@ import pandas as pd
 from scripts.lightmatter_interconnects import (
     # Technology catalog
     ELECTRICAL_800G,
+    ADVANCED_CHIPLET_3P5T,
     LIGHTMATTER_EVK50,
     LIGHTMATTER_EVK100,
     LIGHTMATTER_L200,
@@ -149,6 +153,17 @@ from scripts.lightmatter_interconnects import (
     tpu_improvement_frame,
     tpu_cube_mapping_study,
     optimal_distributed_mapping_frame,
+    compiler_strategy_study,
+    optimal_compiler_strategy_frame,
+    scaling_law_study,
+    scaling_exponent_frame,
+    chiplet_comparison_frame,
+    gemini_proxy_models,
+    default_superpod_configs,
+    superpod_stage_study,
+    superpod_end_to_end_summary,
+    superpod_ablation_frame,
+    superpod_context_scaling_study,
     all_technologies_network_comparison,
     bandwidth_sensitivity_network,
     energy_per_bit_sensitivity_network,
@@ -161,6 +176,8 @@ from scripts.lightmatter_interconnects import (
     HBM_LATENCY_PER_BIT_S,
     IRONWOOD_TFLOPS_PER_CHIP,
     IRONWOOD_HBM_BANDWIDTH_TBPS,
+    IRONWOOD_SUPERPOD_CHIPS,
+    IRONWOOD_SUPERPOD_CUBES,
     TPU_V5P_TFLOPS_PER_CHIP,
     TPU_V5P_HBM_BANDWIDTH_TBPS,
     TPU_V5P_ICI_BIDIR_GBPS,
@@ -184,6 +201,7 @@ TOPO_COLORS = {
 
 TECH_COLORS = {
     "Electrical 800G": "#E34A33",
+    "Advanced chiplet": "#8C6D31",
     "EVK50": "#FEC44F",
     "EVK100": "#31A354",
     "L200": "#2B8CBE",
@@ -232,6 +250,15 @@ tech_rows = [
         "multicast": ELECTRICAL_800G.supports_multicast,
         "notes": ELECTRICAL_800G.notes[:80] + "...",
     }
+,
+    {
+        "name": ADVANCED_CHIPLET_3P5T.name,
+        "BW one-way (Tbps)": ADVANCED_CHIPLET_3P5T.link_bandwidth_bps / 1e12,
+        "pJ/bit": ADVANCED_CHIPLET_3P5T.energy_per_bit_j * 1e12,
+        "router latency (ns)": ADVANCED_CHIPLET_3P5T.router_latency_s * 1e9,
+        "multicast": ADVANCED_CHIPLET_3P5T.supports_multicast,
+        "notes": ADVANCED_CHIPLET_3P5T.notes[:80] + "...",
+    }
 ]
 for label, tech in ALL_LIGHTMATTER_TECHS.items():
     tech_rows.append({
@@ -256,13 +283,14 @@ names = [row["name"] for row in tech_rows]
 bw_vals = [row["BW one-way (Tbps)"] for row in tech_rows]
 e_vals = [row["pJ/bit"] for row in tech_rows]
 
-axes[0].bar(names, bw_vals, color=["#E34A33", "#FEC44F", "#31A354", "#2B8CBE", "#756BB1", "#E378AA"])
+palette = ["#E34A33", "#8C6D31", "#FEC44F", "#31A354", "#2B8CBE", "#756BB1", "#E378AA"]
+axes[0].bar(names, bw_vals, color=palette)
 axes[0].set_title("Link Bandwidth (one-way, Tbps)")
 axes[0].set_ylabel("Tbps")
 axes[0].tick_params(axis="x", rotation=35)
 axes[0].set_yscale("log")
 
-axes[1].bar(names, e_vals, color=["#E34A33", "#FEC44F", "#31A354", "#2B8CBE", "#756BB1", "#E378AA"])
+axes[1].bar(names, e_vals, color=palette)
 axes[1].set_title("Energy per Bit (pJ/bit)")
 axes[1].set_ylabel("pJ/bit")
 axes[1].tick_params(axis="x", rotation=35)
@@ -1163,16 +1191,365 @@ plt.show()
     cells.append(md(
         """### Mapping-Adaptation Takeaway
 
-The switched optical fabrics tend to make the logical-memory level cheaper and flatter:
-the mapper can keep global traffic in the logical cluster level without paying the
-same distance/contention penalty that dominates the electrical torus. When a row reports
-`mapping_differs_from_electrical = True`, the gain is not just a link-cost substitution;
-AccelForge selected a different compact mapping signature after the interconnect change.
+The fixed-point AccelForge tile/residency signatures are intentionally conservative and
+often remain stable: the same GEMM tile hierarchy is still a good local mapping. The
+important architectural shift therefore appears one level above this inner mapper: the
+compiler/dataflow layer below can choose different sharding, remote-memory, and cache-fill
+paradigms once optical multicast and flat high-bandwidth links are available.
 """
     ))
 
     # ------------------------------------------------------------------ #
-    # Section 15: Summary pivot
+    # Section 15: Compiler/dataflow strategies and scaling laws
+    # ------------------------------------------------------------------ #
+    cells.append(md(
+        """## Compiler/Dataflow Paradigms Enabled by Photonics
+
+The inner AccelForge tile mapping is intentionally conservative. To capture the
+larger architectural opportunity, we add a compiler-visible strategy layer inspired by
+XLA/GSPMD and Pallas-style manual prefetching:
+
+| Strategy | Compiler interpretation |
+|---|---|
+| `xla_spmd_collective` | Keep tensors sharded and use collective-permute/all-to-all activation exchange |
+| `remote_hbm_streaming` | Treat remote HBM as a cheap pooled memory level |
+| `replicated_hbm_cache` | Manually prefetch hot state into local HBM and reuse it |
+| `photonic_multicast_cache` | Use optical multicast to fill many caches with one logical transfer |
+
+This is where the new technology changes the mapping paradigm: photonic multicast can make
+explicit cache-fill/broadcast strategies optimal, while electrical and chiplet fabrics remain
+closer to SPMD collectives or local sharding.
+"""
+    ))
+
+    cells.append(code(
+        """
+compiler_df = compiler_strategy_study(
+    workload_names=DEFAULT_WORKLOAD_NAMES,
+    active_nodes=64,
+)
+compiler_df.to_csv(RESULTS_DIR / "compiler_strategy_study.csv", index=False)
+
+optimal_compiler = optimal_compiler_strategy_frame(compiler_df)
+optimal_compiler.to_csv(RESULTS_DIR / "optimal_compiler_strategies.csv", index=False)
+optimal_compiler[
+    [
+        "workload", "architecture", "strategy_label", "memory_paradigm",
+        "baseline_strategy_label", "strategy_changed_vs_baseline",
+        "energy_gain_vs_baseline_strategy_pct",
+    ]
+].sort_values(["workload", "architecture"]).reset_index(drop=True)
+"""
+    ))
+
+    cells.append(code(
+        """
+plot_df = optimal_compiler.sort_values(
+    "energy_gain_vs_baseline_strategy_pct", ascending=False
+).copy()
+plot_df["label"] = plot_df["workload"] + "\\n" + plot_df["architecture"]
+
+fig, ax = plt.subplots(figsize=(12, 5))
+colors = ["#31A354" if x else "#9ECAE1" for x in plot_df["strategy_changed_vs_baseline"]]
+ax.bar(plot_df["label"], plot_df["energy_gain_vs_baseline_strategy_pct"], color=colors)
+ax.set_title("Compiler Strategy Energy Gain vs TPU Electrical Baseline")
+ax.set_ylabel("Energy gain (%)")
+ax.tick_params(axis="x", rotation=35, labelsize=8)
+ax.axhline(0, color="black", linewidth=0.8)
+plt.tight_layout()
+plt.savefig(RESULTS_DIR / "compiler_strategy_choices.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""
+    ))
+
+    cells.append(md(
+        """## Scaling Laws: From One Cube to Superpod Scale
+
+We next hold per-chip traffic fixed and scale from a 64-chip cube toward 9216 chips.
+The key comparison is the slope: torus and chiplet fabrics accumulate hop and contention
+cost, while a switched optical fabric keeps hop count flat and gives multicast an
+approximately constant per-chip cost.
+"""
+    ))
+
+    cells.append(code(
+        """
+scaling_df = scaling_law_study()
+scaling_df.to_csv(RESULTS_DIR / "scaling_law_study.csv", index=False)
+scaling_exponents = scaling_exponent_frame(scaling_df)
+scaling_exponents.to_csv(RESULTS_DIR / "scaling_exponents.csv", index=False)
+
+scaling_exponents.sort_values(
+    ["scenario", "metric", "scaling_exponent"]
+).reset_index(drop=True)
+"""
+    ))
+
+    cells.append(code(
+        """
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+for ax, scenario_name, title in [
+    (axes[0], "all_to_all_activation", "All-to-all Activation Scaling"),
+    (axes[1], "shared_state_multicast", "Shared-State Multicast Scaling"),
+]:
+    sdf = scaling_df[scaling_df["scenario"] == scenario_name]
+    for architecture, group in sdf.groupby("architecture"):
+        group = group.sort_values("active_nodes")
+        ax.plot(group["active_nodes"], group["latency_us_per_chip"], marker="o", label=architecture)
+    ax.set_xscale("log", base=2)
+    ax.set_yscale("log")
+    ax.set_xlabel("Active chips")
+    ax.set_ylabel("Latency per chip (µs)")
+    ax.set_title(title)
+    ax.legend(fontsize=7)
+
+plt.tight_layout()
+plt.savefig(RESULTS_DIR / "scaling_laws.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""
+    ))
+
+    cells.append(md(
+        """## Stronger Baseline: Advanced Chiplet Interconnect
+
+To avoid making the electrical baseline too weak, we also compare against the requested
+advanced-packaging point: **3.5 Tbps one-way links** and **6 pJ/bit per hop**.
+This is modeled as a strong chiplet torus without native multicast.
+"""
+    ))
+
+    cells.append(code(
+        """
+chiplet_df = chiplet_comparison_frame(active_nodes=64)
+chiplet_df.to_csv(RESULTS_DIR / "chiplet_comparison.csv", index=False)
+chiplet_df[
+    [
+        "scenario", "architecture", "energy_uJ_per_chip", "latency_us_per_chip",
+        "energy_reduction_vs_chiplet_pct", "latency_reduction_vs_chiplet_pct",
+    ]
+].sort_values(["scenario", "architecture"]).reset_index(drop=True)
+"""
+    ))
+
+    cells.append(code(
+        """
+plot_df = chiplet_df[chiplet_df["architecture"] != "Advanced chiplet torus"].copy()
+plot_df["label"] = plot_df["architecture"] + "\\n" + plot_df["scenario"]
+
+fig, ax = plt.subplots(figsize=(12, 5))
+ax.bar(plot_df["label"], plot_df["energy_reduction_vs_chiplet_pct"], color="#756BB1")
+ax.set_title("Photonic Fabrics vs Advanced Chiplet Baseline")
+ax.set_ylabel("Energy reduction vs chiplet (%)")
+ax.tick_params(axis="x", rotation=35, labelsize=8)
+ax.axhline(0, color="black", linewidth=0.8)
+plt.tight_layout()
+plt.savefig(RESULTS_DIR / "chiplet_comparison.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""
+    ))
+
+    cells.append(md(
+        """## Full Superpod Gemini-Class End-to-End Study
+
+This is the core end-to-end system study. Google has publicly identified Gemini 3 and
+Gemini 3.1 as the current Gemini family, and TPU7x/Ironwood exposes public superpod
+specifications. Google does **not** publish Gemini 3/3.1 parameter counts or expert
+layouts, so the model below uses explicit public proxy workloads:
+
+- a speed-optimized dense Gemini 3 Flash-class proxy,
+- a 4.7T-parameter sparse MoE proxy motivated by Lightmatter's public 256-expert / 8-active-expert study,
+- a long-context Deep Think-style proxy that stresses prefill, KV traffic, and expert routing.
+
+The purpose is not to claim confidential Gemini internals. The purpose is to quantify
+which end-to-end stages would improve on a 9216-chip Ironwood superpod if the fabric
+changed from electrical torus links to Lightmatter-style photonic topologies and if XLA/Pallas
+could exploit the resulting new data-placement choices.
+"""
+    ))
+
+    cells.append(code(
+        """
+print(f"Ironwood superpod: {IRONWOOD_SUPERPOD_CHIPS} chips = {IRONWOOD_SUPERPOD_CUBES} cubes")
+print(f"Per chip: {IRONWOOD_TFLOPS_PER_CHIP:.0f} FP8 TFLOP/s, {IRONWOOD_HBM_BANDWIDTH_TBPS:.1f} TB/s HBM")
+print()
+print("Gemini-class proxy workloads:")
+for key, model in gemini_proxy_models().items():
+    print(
+        f"  {key:34s} kind={model.model_kind:5s} "
+        f"total={model.total_params_b:.0f}B active={model.active_params_b:.0f}B "
+        f"ctx={model.prompt_tokens:,} out={model.output_tokens:,}"
+    )
+"""
+    ))
+
+    cells.append(code(
+        """
+superpod_stage_df = superpod_stage_study()
+superpod_stage_df.to_csv(RESULTS_DIR / "superpod_stage_study.csv", index=False)
+
+superpod_summary = superpod_end_to_end_summary(superpod_stage_df)
+superpod_summary.to_csv(RESULTS_DIR / "superpod_end_to_end_summary.csv", index=False)
+
+superpod_ablation = superpod_ablation_frame(superpod_summary)
+superpod_ablation.to_csv(RESULTS_DIR / "superpod_ablation_study.csv", index=False)
+
+superpod_context = superpod_context_scaling_study()
+superpod_context.to_csv(RESULTS_DIR / "superpod_context_scaling.csv", index=False)
+
+superpod_summary[
+    [
+        "model", "phase", "configuration", "speedup_vs_baseline",
+        "energy_reduction_vs_baseline_pct", "network_latency_share_pct",
+        "throughput_tokens_per_s",
+    ]
+].sort_values(["model", "phase", "speedup_vs_baseline"], ascending=[True, True, False])
+"""
+    ))
+
+    cells.append(md(
+        """### End-to-End Speedups
+
+The most important result is stage-dependent:
+
+- **Inference** benefits strongly because decode, KV access, expert routing, and cache-fill traffic
+  are network-sensitive. The full M1000 photonic compiler stack produces the largest end-to-end
+  speedups, especially for long-context / Deep Think-style inference.
+- **Training** is more compute dominated, so the network improvement is smaller end-to-end.
+  The gains still matter because they reduce exposed collectives, optimizer traffic, and pipeline bubbles.
+- **Advanced chiplet** is a much stronger baseline than simple electrical ICI, but it still lacks
+  flat optical switching and native multicast.
+"""
+    ))
+
+    cells.append(code(
+        """
+plot_df = superpod_summary[
+    superpod_summary["configuration"].isin([
+        "Advanced chiplet torus + XLA SPMD",
+        "M1000 switched optical topology only",
+        "M1000 full photonic compiler stack",
+    ])
+].copy()
+plot_df["label"] = (
+    plot_df["model"].str.replace("Gemini ", "G.", regex=False)
+    + "\\n"
+    + plot_df["phase"].str.title()
+    + "\\n"
+    + plot_df["configuration"].str.replace(" + ", "\\n+ ", regex=False)
+)
+
+fig, ax = plt.subplots(figsize=(14, 6))
+ax.bar(plot_df["label"], plot_df["speedup_vs_baseline"], color="#2B8CBE")
+ax.set_title("9216-Chip Ironwood Superpod: End-to-End Speedup vs Electrical Baseline")
+ax.set_ylabel("Speedup (x)")
+ax.axhline(1.0, color="black", linewidth=0.8)
+ax.tick_params(axis="x", rotation=35, labelsize=7)
+plt.tight_layout()
+plt.savefig(RESULTS_DIR / "superpod_end_to_end_speedups.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""
+    ))
+
+    cells.append(md(
+        """### Technique Ablations
+
+This ablation ladder separates the effects of:
+
+1. a stronger chiplet baseline,
+2. photonic torus with multicast,
+3. switched optical topology,
+4. multicast cache fills,
+5. remote pooled-HBM streaming,
+6. MoE locality routing,
+7. the full photonic compiler stack.
+"""
+    ))
+
+    cells.append(code(
+        """
+superpod_ablation[
+    [
+        "model", "phase", "technique", "speedup_vs_baseline",
+        "speedup_increment_vs_previous", "network_latency_share_pct",
+        "network_energy_share_pct",
+    ]
+].sort_values(["model", "phase"]).reset_index(drop=True)
+"""
+    ))
+
+    cells.append(code(
+        """
+target = "Gemini 3.1 Pro-class sparse MoE proxy"
+plot_df = superpod_ablation[
+    (superpod_ablation["model"] == target)
+    & (superpod_ablation["phase"] == "inference")
+].copy()
+
+fig, ax = plt.subplots(figsize=(12, 5))
+ax.bar(plot_df["technique"], plot_df["speedup_vs_baseline"], color="#31A354")
+ax.set_title("Ablation Ladder: Gemini 3.1 Pro-Class Inference Proxy")
+ax.set_ylabel("Speedup vs electrical baseline (x)")
+ax.axhline(1.0, color="black", linewidth=0.8)
+ax.tick_params(axis="x", rotation=35, labelsize=8)
+plt.tight_layout()
+plt.savefig(RESULTS_DIR / "superpod_ablation_speedups.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""
+    ))
+
+    cells.append(md(
+        """### Stage Breakdown and Context Scaling
+
+The stage table below identifies what remains after applying the full photonic compiler stack.
+This helps avoid the common mistake of reporting only link-level gains: once the network stops
+dominating, compute and HBM become the limiting terms.
+"""
+    ))
+
+    cells.append(code(
+        """
+stage_focus = superpod_stage_df[
+    (superpod_stage_df["configuration"] == "M1000 full photonic compiler stack")
+    & (superpod_stage_df["model"] == "Gemini 3.1 Pro-class sparse MoE proxy")
+].copy()
+stage_focus[
+    [
+        "phase", "stage", "total_latency_s", "network_latency_share_pct",
+        "network_energy_share_pct", "bottleneck", "network_gib_per_chip",
+    ]
+].sort_values(["phase", "total_latency_s"], ascending=[True, False])
+"""
+    ))
+
+    cells.append(code(
+        """
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+stage_focus["label"] = stage_focus["phase"].str.title() + "\\n" + stage_focus["stage"]
+axes[0].bar(stage_focus["label"], stage_focus["total_latency_s"], color="#31A354")
+axes[0].set_title("Full Stack: Remaining Stage Latency")
+axes[0].set_ylabel("Latency (s)")
+axes[0].tick_params(axis="x", rotation=35, labelsize=8)
+
+for config, group in superpod_context.groupby("configuration"):
+    group = group.sort_values("context_tokens")
+    axes[1].plot(group["context_tokens"], group["total_latency_s"], marker="o", label=config)
+axes[1].set_title("Context Scaling: Inference Latency")
+axes[1].set_xlabel("Prompt tokens")
+axes[1].set_ylabel("Latency (s)")
+axes[1].set_xscale("log", base=2)
+axes[1].set_yscale("log")
+axes[1].legend(fontsize=7)
+
+plt.tight_layout()
+plt.savefig(RESULTS_DIR / "superpod_stage_and_context.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""
+    ))
+
+    # ------------------------------------------------------------------ #
+    # Section 16: Summary pivot
     # ------------------------------------------------------------------ #
     cells.append(md(
         """## Summary Results
@@ -1231,13 +1608,33 @@ print(tpu_best.to_string())
    table shows which communication strategy (`node_to_node`, `node_to_dram`, or
    `shared_dram_multicast`) becomes optimal under each interconnect.
 
-5. **For the TPU cube:** A photonic switched fabric (L200 or higher) eliminates
+5. **The stronger compiler/dataflow result is the real paradigm shift.** XLA/Pallas-visible
+   choices such as software-managed cache fill and multicast prefetch are not attractive on
+   multi-hop electrical fabrics, but become optimal on photonic fabrics for reuse-heavy
+   prefill and shared-state workloads.
+
+6. **Scaling laws improve.** Larger torus and chiplet systems accumulate hop and contention
+   cost as chip count grows, while a switched optical fabric keeps hop count flat and makes
+   shared-state multicast close to fanout-independent.
+
+7. **For the TPU cube:** A photonic switched fabric (L200 or higher) eliminates
    multi-hop routing entirely. The gain over a photonic torus is largest for
    global traffic patterns — `all_to_all_shard_exchange` and `shared_weight_multicast`.
 
-6. **M1000 at 114.6 Tbps aggregate** represents the next architectural step:
+8. **M1000 at 114.6 Tbps aggregate** represents the next architectural step:
    not just a faster link but an on-chip OCS that enables dynamic reconfiguration
    of the network fabric without static cabling changes.
+
+9. **For a full 9216-chip Ironwood superpod running Gemini-class proxy workloads,**
+   inference is the main beneficiary: the M1000 full photonic compiler stack improves
+   long-context / MoE inference by roughly an order of magnitude in the analytic model.
+   Training still improves, but by a smaller amount because forward/backward compute
+   dominates once collectives and expert routing stop being the bottleneck.
+
+10. **The most defensible project claim is not "photonic links make every workload faster."**
+    The stronger claim is more nuanced: photonics changes which distributed memory and
+    compiler strategies are attractive, and the end-to-end benefit depends on how much
+    of the phase is network-exposed after compute/HBM overlap.
 """
     ))
 
