@@ -10,7 +10,7 @@ AccelForge's iterative hardware mapper.
 
 | File | Description |
 |---|---|
-| `4_lightmatter_interconnects.ipynb` | **Main executed notebook** — all 3 milestones + TPU cube ICI study + mapping-choice analysis + compiler/dataflow strategies + scaling laws + chiplet baseline + full-superpod Gemini-class study. 80 cells, fully executed, 0 errors. |
+| `lightmatter_interconnects.ipynb` | **Main executed notebook** — all 3 milestones + TPU cube ICI study + mapping-choice analysis + compiler/dataflow strategies + scaling laws + chiplet baseline + full-superpod Gemini-class study. 80 cells, fully executed, 0 errors. |
 | `scripts/lightmatter_interconnects.py` | Core study engine: topology models, iterative solver, mapping signatures, TPU cube mapping study, compiler/dataflow study, scaling laws, full-superpod model, technology catalog, sweep functions, CLI. |
 | `scripts/generate_lightmatter_notebook.py` | Programmatic notebook generator. |
 | `tests/test_lightmatter_project.py` | 68-test suite covering all components. |

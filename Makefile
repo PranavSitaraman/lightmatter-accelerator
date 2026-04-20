@@ -16,7 +16,7 @@ study:
 
 # Regenerate and execute the notebook (40-minute timeout).
 notebook:
-	$(call run-in-docker,'python3 scripts/generate_lightmatter_notebook.py --output 4_lightmatter_interconnects.ipynb && jupyter nbconvert --to notebook --execute --inplace 4_lightmatter_interconnects.ipynb --ExecutePreprocessor.timeout=2400')
+	$(call run-in-docker,'python3 scripts/generate_lightmatter_notebook.py --output lightmatter_interconnects.ipynb && jupyter nbconvert --to notebook --execute --inplace lightmatter_interconnects.ipynb --ExecutePreprocessor.timeout=2400')
 
 # Run the full 68-test suite.
 test:

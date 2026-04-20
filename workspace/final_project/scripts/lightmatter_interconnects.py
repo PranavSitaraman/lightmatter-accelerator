@@ -68,7 +68,7 @@ IRONWOOD_HBM_BANDWIDTH_TBPS = 7.4
 IRONWOOD_SUPERPOD_CHIPS = 9216
 IRONWOOD_CUBE_CHIPS = 64
 IRONWOOD_SUPERPOD_CUBES = IRONWOOD_SUPERPOD_CHIPS // IRONWOOD_CUBE_CHIPS
-IRONWOOD_ICI_BIDIR_GBPS_ESTIMATED = 1200.0  # public TPU7x table: GB/s per chip
+IRONWOOD_ICI_BIDIR_GBPS = 1200.0  # public TPU7x table: GB/s per chip
 
 
 # ---------------------------------------------------------------------------
@@ -936,7 +936,6 @@ def evaluate_compiler_strategy(
         raise ValueError(f"Unknown compiler strategy: {strategy_name}")
 
     strategy = COMPILER_STRATEGIES[strategy_name]
-    scenario = Scenario(strategy_name, strategy.description, strategy_name, active_nodes)
     tensor_bits = _workload_tensor_bits(workload)
     compute_energy_j, compute_latency_s = _workload_compute_cost(workload)
     reuse_steps = max(1.0, WORKLOAD_REUSE_STEPS.get(workload.name, 8) * strategy.cache_reuse_scale)

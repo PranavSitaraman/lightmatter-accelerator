@@ -18,7 +18,7 @@ import nbformat as nbf
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NOTEBOOK_PATH = ROOT / "4_lightmatter_interconnects.ipynb"
+NOTEBOOK_PATH = ROOT / "lightmatter_interconnects.ipynb"
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ from scripts.lightmatter_interconnects import (
     TPU_V5P_TFLOPS_PER_CHIP,
     TPU_V5P_HBM_BANDWIDTH_TBPS,
     TPU_V5P_ICI_BIDIR_GBPS,
-    IRONWOOD_ICI_BIDIR_GBPS_ESTIMATED,
+    IRONWOOD_ICI_BIDIR_GBPS,
 )
 
 pd.set_option("display.max_columns", 100)
@@ -1016,8 +1016,8 @@ print(f"  v5p:     {TPU_V5P_TFLOPS_PER_CHIP:>5.0f} TFLOPS/chip, "
       f"{TPU_V5P_ICI_BIDIR_GBPS:.0f} GB/s bidir ICI")
 print(f"  Ironwood:{IRONWOOD_TFLOPS_PER_CHIP:>5.0f} TFLOPS/chip, "
       f"{IRONWOOD_HBM_BANDWIDTH_TBPS:.1f} TBps HBM, "
-      f"~{IRONWOOD_ICI_BIDIR_GBPS_ESTIMATED:.0f} GB/s bidir ICI (estimated)")
-print(f"  (Ironwood ICI not publicly disclosed; estimated from HBM BW scaling)")
+      f"~{IRONWOOD_ICI_BIDIR_GBPS:.0f} GB/s bidir ICI")
+print(f"  (Ironwood ICI: 1200 GB/s bidirectional per public TPU7x cloud documentation)")
 """
     ))
 

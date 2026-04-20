@@ -15,7 +15,7 @@ The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/fin
 
 ## Main Artifacts
 
-- Notebook: [workspace/final_project/4_lightmatter_interconnects.ipynb](/home/pranav/6.5930/final-project/workspace/final_project/4_lightmatter_interconnects.ipynb)
+- Notebook: [workspace/final_project/lightmatter_interconnects.ipynb](/home/pranav/6.5930/final-project/workspace/final_project/lightmatter_interconnects.ipynb)
 - Study engine: [workspace/final_project/scripts/lightmatter_interconnects.py](/home/pranav/6.5930/final-project/workspace/final_project/scripts/lightmatter_interconnects.py)
 - Notebook generator: [workspace/final_project/scripts/generate_lightmatter_notebook.py](/home/pranav/6.5930/final-project/workspace/final_project/scripts/generate_lightmatter_notebook.py)
 - Architecture: [workspace/final_project/arch/tpu_lightmatter_cluster.yaml](/home/pranav/6.5930/final-project/workspace/final_project/arch/tpu_lightmatter_cluster.yaml)

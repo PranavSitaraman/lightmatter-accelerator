@@ -552,6 +552,69 @@ The final repository is production-oriented and reproducible:
     presentation-ready figures.
 \end{itemize}
 
+\section{Discussion}
+
+\subsection{Separating five types of gain}
+
+This project distinguishes five sources of improvement that are often conflated
+when evaluating photonic interconnects.
+
+\textbf{(1) Pure link-technology gain.} Replacing an electrical torus link with
+an optical one at the same topology reduces energy and latency in proportion
+to the per-bit energy and bandwidth ratios. This gain applies immediately
+without any mapping or compiler change. For EVK100 at 1.9~\pjbit{} versus
+electrical ICI at 10.0~\pjbit{}, the link energy ratio is $5.3\times$.
+
+\textbf{(2) Topology gain (hop reduction and contention).} Switching from a
+torus or mesh to a flat optical crossbar or switched fabric reduces the average
+hop count toward one and eliminates contention-driven bandwidth derating.
+These gains are captured by the iterative network cost model and partially
+explain why M1000 at 57.3~\tbps{} delivers far more than a raw bandwidth
+ratio would suggest for multicast traffic.
+
+\textbf{(3) Remapping / distributed mapping gain.} When the network energy
+model is fed back into the AccelForge logical cluster memory and the
+workload is re-mapped, 5 of 16 workload-scenario pairs change their
+optimal distributed communication pattern (from node-to-node to
+shared\_dram\_multicast) under EVK100 or M1000. In contrast, 0 of 24 inner
+AccelForge tile mapping signatures change---the tiling and loop ordering inside
+each node remain stable because they are compute- and SRAM-bandwidth-limited,
+not network-limited.
+
+\textbf{(4) Compiler/dataflow strategy gain.} Above the tile mapper, the
+choice among XLA/GSPMD-style sharded collectives, remote pooled-HBM streaming,
+replicated HBM caching, and photonic multicast cache fills changes for
+photonic architectures. Remote pooled-HBM streaming on M1000 for kv\_attention
+reduces effective compute energy by 67.75\% compared to the baseline strategy.
+Multicast cache fill becomes uniquely feasible on M1000 because it requires
+hardware multicast support.
+
+\textbf{(5) Full end-to-end system gain.} The 9216-chip superpod model
+compounds all four effects across a realistic sequence of compute and memory
+stages. Long-context inference benefits most ($14.50\times$ speedup for the
+Deep Think proxy) because decode, KV attention, and expert routing stages are
+all network-exposed. Training improves less ($1.43\times$) because gradient
+synchronization remains partially overlapped with compute, and the system is
+compute-dominated once expert traffic is reduced.
+
+\subsection{Where photonics helps most}
+
+The unifying pattern across all five gain types is sensitivity to traffic that
+either leaves the local HBM bank or fans out to many chips. Local
+nearest-neighbor activation exchange benefits modestly from photonics because
+an electrical torus already handles it efficiently (one electrical hop). In
+contrast, remote weight refill, KV-cache broadcast, MoE expert dispatch, and
+shared-weight multicast all traverse many hops or replicate across many
+receivers on an electrical fabric; a flat photonic switched fabric can collapse
+these to one logical hop at broadcast energy.
+
+The comparison against the advanced chiplet baseline (3.5~\tbps{}, 6~\pjbit{})
+is important for calibration. Chiplets already close most of the bandwidth gap
+but retain per-hop energy costs and no multicast support. The residual M1000
+advantage over the chiplet baseline is 99.85\% for shared-state multicast,
+confirming that the multicast property---not just higher bandwidth---is the
+decisive factor for shared-state workloads.
+
 \section{Timeline and Work Distribution}
 
 The implementation is complete. \tabref{tab:timeline} maps the original
