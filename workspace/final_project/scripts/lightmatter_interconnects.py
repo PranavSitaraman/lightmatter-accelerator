@@ -2516,6 +2516,111 @@ def superpod_context_scaling_study(
     return pd.DataFrame(rows).sort_values(["context_tokens", "configuration"]).reset_index(drop=True)
 
 
+def _normalize_phases(phases: Iterable[str] | None) -> tuple[str, ...]:
+    """Validate and normalize phase names used by the superpod workflow."""
+    if phases is None:
+        return ("inference", "training")
+    normalized = tuple(dict.fromkeys(phase.strip().lower() for phase in phases if phase.strip()))
+    valid = {"inference", "training"}
+    unknown = sorted(set(normalized) - valid)
+    if unknown:
+        raise ValueError(f"Unknown superpod phase(s): {', '.join(unknown)}")
+    return normalized or ("inference", "training")
+
+
+def _default_superpod_prefix(phases: tuple[str, ...]) -> str:
+    if phases == ("inference",):
+        return "inference"
+    if phases == ("training",):
+        return "training"
+    return "superpod"
+
+
+def write_superpod_workflow_outputs(
+    output_dir: str | Path,
+    phases: Iterable[str] | None = None,
+    model_names: Iterable[str] = ("gemini3_1_pro_moe_proxy", "gemini3_deepthink_long_context_proxy"),
+    active_chips: int = IRONWOOD_SUPERPOD_CHIPS,
+    prefix: str | None = None,
+    include_context_scaling: bool = True,
+) -> dict[str, Path]:
+    """
+    Write phase-specific superpod workflow artifacts.
+
+    This is the production-facing entry point for the modeled training and
+    inference flows. The full `all` study still writes the historical
+    `superpod_*` artifacts; this helper lets users regenerate only the
+    training, inference, or combined superpod outputs without running the
+    AccelForge mapper studies.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    selected_phases = _normalize_phases(phases)
+    file_prefix = prefix or _default_superpod_prefix(selected_phases)
+    selected_models = tuple(model_names) or tuple(gemini_proxy_models())
+    unknown_models = sorted(set(selected_models) - set(gemini_proxy_models()))
+    if unknown_models:
+        raise ValueError(f"Unknown Gemini proxy model(s): {', '.join(unknown_models)}")
+
+    stage_df = superpod_stage_study(
+        model_names=selected_models,
+        active_chips=active_chips,
+    )
+    stage_df = stage_df[stage_df["phase"].isin(selected_phases)].reset_index(drop=True)
+    summary_df = superpod_end_to_end_summary(stage_df)
+    ablation_df = superpod_ablation_frame(summary_df)
+
+    paths: dict[str, Path] = {
+        "stage_study": output_dir / f"{file_prefix}_stage_study.csv",
+        "end_to_end_summary": output_dir / f"{file_prefix}_end_to_end_summary.csv",
+        "ablation_study": output_dir / f"{file_prefix}_ablation_study.csv",
+        "workflow_summary": output_dir / f"{file_prefix}_workflow_summary.md",
+    }
+    stage_df.to_csv(paths["stage_study"], index=False)
+    summary_df.to_csv(paths["end_to_end_summary"], index=False)
+    ablation_df.to_csv(paths["ablation_study"], index=False)
+
+    context_df = pd.DataFrame()
+    if include_context_scaling and "inference" in selected_phases:
+        context_df = superpod_context_scaling_study(active_chips=active_chips)
+        paths["context_scaling"] = output_dir / f"{file_prefix}_context_scaling.csv"
+        context_df.to_csv(paths["context_scaling"], index=False)
+
+    lines = [
+        f"# {file_prefix.title()} Workflow Summary",
+        "",
+        f"Phases: {', '.join(selected_phases)}",
+        f"Active chips: {active_chips}",
+        f"Models: {', '.join(selected_models)}",
+        "",
+        "## Best Configurations",
+        "",
+    ]
+    if summary_df.empty:
+        lines.append("No rows generated.")
+    else:
+        best = summary_df.sort_values(
+            ["model", "phase", "speedup_vs_baseline"],
+            ascending=[True, True, False],
+        ).groupby(["model", "phase"]).head(1)
+        for row in best.itertuples(index=False):
+            lines.append(
+                f"- {row.model} / {row.phase}: {row.configuration} "
+                f"({row.speedup_vs_baseline:.2f}x latency speedup, "
+                f"{row.energy_reduction_vs_baseline_pct:.2f}% energy reduction)."
+            )
+    if not context_df.empty:
+        lines.extend([
+            "",
+            "## Context Scaling",
+            "",
+            "Long-context inference scaling is included because only inference "
+            "has prompt/output-token context-length sweeps in this model.",
+        ])
+    paths["workflow_summary"].write_text("\n".join(lines) + "\n")
+    return paths
+
+
 # ---------------------------------------------------------------------------
 # TPU Cube ICI Replacement Study
 # ---------------------------------------------------------------------------
@@ -3689,7 +3794,17 @@ def main(argv: list[str] | None = None) -> int:
         "command",
         nargs="?",
         default="all",
-        choices=("all", "cluster", "tpu", "tpu-mapping", "sources", "tech"),
+        choices=(
+            "all",
+            "cluster",
+            "tpu",
+            "tpu-mapping",
+            "superpod",
+            "inference",
+            "training",
+            "sources",
+            "tech",
+        ),
         help="Artifact set to generate.",
     )
     parser.add_argument(
@@ -3706,6 +3821,17 @@ def main(argv: list[str] | None = None) -> int:
         "--scenarios",
         default=",".join(DEFAULT_SCENARIO_NAMES),
         help="Comma-separated scenario names for the cluster study.",
+    )
+    parser.add_argument(
+        "--models",
+        default="gemini3_1_pro_moe_proxy,gemini3_deepthink_long_context_proxy",
+        help="Comma-separated Gemini proxy model keys for superpod/training/inference studies.",
+    )
+    parser.add_argument(
+        "--active-chips",
+        type=int,
+        default=IRONWOOD_SUPERPOD_CHIPS,
+        help="Active chip count for superpod/training/inference studies.",
     )
     args = parser.parse_args(argv)
     output_dir = Path(args.output_dir)
@@ -3745,6 +3871,23 @@ def main(argv: list[str] | None = None) -> int:
         mapping_path = output_dir / "tpu_mapping_study.csv"
         tpu_mapping_df.to_csv(mapping_path, index=False)
         print(f"tpu_mapping_study: {mapping_path}")
+        return 0
+
+    if args.command in {"superpod", "inference", "training"}:
+        phase_map = {
+            "superpod": ("inference", "training"),
+            "inference": ("inference",),
+            "training": ("training",),
+        }
+        paths = write_superpod_workflow_outputs(
+            output_dir,
+            phases=phase_map[args.command],
+            model_names=_csv_arg(args.models, tuple(gemini_proxy_models())),
+            active_chips=args.active_chips,
+            prefix=args.command,
+        )
+        for key, path in paths.items():
+            print(f"{key}: {path}")
         return 0
 
     if args.command == "sources":

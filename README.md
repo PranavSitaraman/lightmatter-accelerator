@@ -10,7 +10,7 @@ The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/fin
 - a compiler/dataflow strategy model that shows mapping changes beyond constant-factor link substitutions,
 - superpod-scale scaling-law and advanced chiplet-baseline comparisons,
 - a 9216-chip Ironwood/Gemini-class end-to-end training and inference model with staged ablations,
-- automated unit/integration tests,
+- automated unit/integration tests and phase-specific training/inference workflow outputs,
 - a cleaned architecture/workload setup focused on the final project rather than the earlier lab template.
 
 ## Main Artifacts
@@ -22,7 +22,7 @@ The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/fin
 - Workload: [workspace/final_project/workload/single_matmul.yaml](/home/pranav/6.5930/final-project/workspace/final_project/workload/single_matmul.yaml)
 - Condensed presentation package: [workspace/final_project/results/presentation](/home/pranav/6.5930/final-project/workspace/final_project/results/presentation)
 
-The main notebook is fully executed with 80 cells and no errors. The test suite currently contains 68 tests.
+The main notebook is fully executed with 80 cells and no errors. The test suite currently contains 70 tests.
 
 ## Added Studies
 
@@ -37,8 +37,12 @@ From this directory:
 
 ```bash
 make study
+make inference
+make training
+make superpod
 make notebook
 make test
+make validate
 ```
 
-These commands run inside the AccelForge Docker image and write outputs under [workspace/final_project/results](/home/pranav/6.5930/final-project/workspace/final_project/results).
+These commands run inside the AccelForge Docker image and write outputs under [workspace/final_project/results](/home/pranav/6.5930/final-project/workspace/final_project/results). `make inference`, `make training`, and `make superpod` regenerate only the end-to-end phase workflow artifacts without rerunning the slower AccelForge mapping sweeps.

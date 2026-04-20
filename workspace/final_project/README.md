@@ -13,7 +13,7 @@ AccelForge's iterative hardware mapper.
 | `lightmatter_interconnects.ipynb` | **Main executed notebook** — all 3 milestones + TPU cube ICI study + mapping-choice analysis + compiler/dataflow strategies + scaling laws + chiplet baseline + full-superpod Gemini-class study. 80 cells, fully executed, 0 errors. |
 | `scripts/lightmatter_interconnects.py` | Core study engine: topology models, iterative solver, mapping signatures, TPU cube mapping study, compiler/dataflow study, scaling laws, full-superpod model, technology catalog, sweep functions, CLI. |
 | `scripts/generate_lightmatter_notebook.py` | Programmatic notebook generator. |
-| `tests/test_lightmatter_project.py` | 68-test suite covering all components. |
+| `tests/test_lightmatter_project.py` | 70-test suite covering all components. |
 | `arch/tpu_lightmatter_cluster.yaml` | AccelForge architecture: 2D/3D logical cluster memory + node array + HBM + UB + MAC. |
 | `workload/single_matmul.yaml` | Parameterized GEMM workload template (M, K, N, bits). |
 | `results/presentation/` | Concise final-report package: executive summary, topology diagram, and nine condensed plots. |
@@ -82,6 +82,9 @@ superpod_stage_study.csv   — stage-level Gemini-class inference/training super
 superpod_end_to_end_summary.csv — end-to-end training/inference totals and speedups
 superpod_ablation_study.csv — topology/compiler/dataflow ablation ladder
 superpod_context_scaling.csv — long-context inference scaling sensitivity
+inference_*                 — inference-only superpod workflow artifacts
+training_*                  — training-only superpod workflow artifacts
+superpod_*                  — combined training/inference superpod workflow artifacts
 presentation/              — concise executive summary + 9 chart/diagram assets
 sources.csv                — research bibliography
 summary.md                 — auto-generated highlights report
@@ -94,11 +97,19 @@ summary.md                 — auto-generated highlights report
 # Run the full study (CSVs + summary)
 make study
 
+# Regenerate only end-to-end phase workflows
+make inference
+make training
+make superpod
+
 # Regenerate and execute the notebook
 make notebook
 
-# Run all 68 tests
+# Run all 70 tests
 make test
+
+# Production validation: tests + full artifact regeneration
+make validate
 
 # Clean generated outputs
 make clean-results

@@ -68,6 +68,7 @@ from scripts.lightmatter_interconnects import (
     superpod_end_to_end_summary,
     superpod_ablation_frame,
     superpod_context_scaling_study,
+    write_superpod_workflow_outputs,
     all_technologies_network_comparison,
     bandwidth_sensitivity_network,
     energy_per_bit_sensitivity_network,
@@ -403,6 +404,36 @@ class TestSweepFunctions(unittest.TestCase):
         df = superpod_context_scaling_study(context_tokens=(4096, 32768), output_tokens=128)
         full_stack = df[df["configuration"] == "M1000 full photonic compiler stack"]
         self.assertTrue((full_stack["speedup_vs_baseline"] > 1.0).all())
+
+    def test_inference_workflow_outputs_are_phase_specific(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = write_superpod_workflow_outputs(
+                tmpdir,
+                phases=("inference",),
+                model_names=("gemini3_1_pro_moe_proxy",),
+                prefix="inference",
+            )
+            summary = pd.read_csv(paths["end_to_end_summary"])
+            stages = pd.read_csv(paths["stage_study"])
+            self.assertEqual(set(summary["phase"]), {"inference"})
+            self.assertEqual(set(stages["phase"]), {"inference"})
+            self.assertIn("context_scaling", paths)
+            self.assertTrue(Path(paths["workflow_summary"]).exists())
+
+    def test_training_workflow_outputs_are_phase_specific(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = write_superpod_workflow_outputs(
+                tmpdir,
+                phases=("training",),
+                model_names=("gemini3_1_pro_moe_proxy",),
+                prefix="training",
+            )
+            summary = pd.read_csv(paths["end_to_end_summary"])
+            stages = pd.read_csv(paths["stage_study"])
+            self.assertEqual(set(summary["phase"]), {"training"})
+            self.assertEqual(set(stages["phase"]), {"training"})
+            self.assertNotIn("context_scaling", paths)
+            self.assertTrue((summary["speedup_vs_baseline"] >= 1.0).any())
 
 
 # =========================================================================

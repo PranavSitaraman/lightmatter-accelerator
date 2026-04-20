@@ -1,0 +1,758 @@
+\documentclass[9pt,aspectratio=169]{beamer}
+
+% ---------------------------------------------------------------------------
+% Final project presentation
+% ---------------------------------------------------------------------------
+\usetheme{Madrid}
+\useinnertheme{circles}
+\usefonttheme{professionalfonts}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{caption}[numbered]
+\setbeamerfont{frametitle}{series=\bfseries,size=\large}
+\setbeamerfont{title}{series=\bfseries,size=\Large}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning}
+\usepackage{url}
+\usepackage{listings}
+
+\graphicspath{{results/presentation/}{results/}{./}}
+\DeclareGraphicsExtensions{.pdf,.png,.jpg}
+
+\definecolor{DeepNavy}{HTML}{0B1F3A}
+\definecolor{Ink}{HTML}{1F2937}
+\definecolor{Muted}{HTML}{5B6472}
+\definecolor{Photon}{HTML}{007C89}
+\definecolor{Amber}{HTML}{D97706}
+\definecolor{Mist}{HTML}{EEF6F6}
+\definecolor{Sand}{HTML}{FFF7ED}
+\definecolor{SoftBlue}{HTML}{EAF2FF}
+\definecolor{SoftGray}{HTML}{F5F7FA}
+
+\setbeamercolor{normal text}{fg=Ink,bg=white}
+\setbeamercolor{structure}{fg=Photon}
+\setbeamercolor{title}{fg=white,bg=DeepNavy}
+\setbeamercolor{frametitle}{fg=white,bg=DeepNavy}
+\setbeamercolor{block title}{fg=white,bg=Photon}
+\setbeamercolor{block body}{fg=Ink,bg=Mist}
+\setbeamercolor{alerted text}{fg=Amber}
+\setbeamercolor{footline}{fg=white,bg=DeepNavy}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{R}{>{\raggedleft\arraybackslash}X}
+\newcommand{\pjbit}{pJ/bit}
+\newcommand{\tbps}{Tb/s}
+\newcommand{\gbps}{GB/s}
+\newcommand{\code}[1]{\texttt{\footnotesize #1}}
+\newcommand{\tightspace}{\vspace{0.35em}}
+\newenvironment{tightitemize}{\begin{itemize}\setlength{\itemsep}{3pt}\setlength{\parskip}{0pt}}{\end{itemize}}
+\newenvironment{tightenumerate}{\begin{enumerate}\setlength{\itemsep}{3pt}\setlength{\parskip}{0pt}}{\end{enumerate}}
+
+\newcommand{\metriccard}[3]{
+  \begin{beamercolorbox}[rounded=true,shadow=true,wd=\linewidth,sep=0.65em]{block body}
+    {\Large\bfseries\color{Photon} #1}\par
+    {\small\bfseries #2}\par
+    {\scriptsize\color{Muted} #3}
+  \end{beamercolorbox}
+}
+
+\newcommand{\sectionlabel}[1]{{\scriptsize\bfseries\color{Photon} #1}}
+\newcommand{\smallsource}[1]{{\tiny\color{Muted} Source: #1}}
+
+\title[Lightmatter Photonic Interconnects]{Photonic Interconnects for TPU-Scale LLM Accelerators}
+\subtitle{AccelForge modeling of Lightmatter-style topologies, compiler-visible dataflows, and 9216-chip Gemini-class training/inference}
+\author[Pranav Sitaraman]{Pranav Sitaraman}
+\institute[6.5930]{6.5930 Hardware Architecture for Deep Learning}
+\date[Final Project]{Final Project Presentation}
+
+\begin{document}
+
+% ---------------------------------------------------------------------------
+\begin{frame}
+  \titlepage
+  \vspace{-0.6em}
+  \begin{center}
+    {\small Project 12: Evaluate a New Technology}\\
+    {\scriptsize Emerging technology: Lightmatter Passage photonic interconnects}
+  \end{center}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{One-Slide Story}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.31\textwidth}
+      \metriccard{72.21\%}{Best 16-node energy reduction}{EVK100 optical crossbar vs electrical 4x4 mesh on shared-DRAM multicast.}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \metriccard{5 / 16}{Changed distributed mappings}{Photonic links make shared-DRAM multicast optimal for prefill-style traffic.}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \metriccard{14.50$\times$}{Best SuperPod inference speedup}{Gemini 3 Deep Think proxy on 9216 Ironwood chips with M1000 full stack.}
+    \end{column}
+  \end{columns}
+
+  \vspace{1.0em}
+  \begin{block}{Thesis}
+    Photonic interconnects are not just cheaper wires. High bandwidth, flatter topology, and native multicast can change the memory placement and compiler dataflow that should be chosen for distributed inference. Training still improves, but becomes compute dominated once collective traffic is reduced.
+  \end{block}
+
+  \vspace{0.4em}
+  {\scriptsize All headline numbers come from the checked-in pipeline: \code{make validate}, \code{make study}, \code{make inference}, \code{make training}, and \code{make superpod}.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Narrative Arc}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \sectionlabel{The class question}
+      \begin{tightitemize}
+        \item AccelForge tells us how a workload maps to a memory hierarchy.
+        \item The project asks what happens when the logical memory level is actually a cluster of accelerators joined by a real network.
+        \item The network is fed back into the logical memory cost, then the mapper is rerun until stable.
+      \end{tightitemize}
+
+      \vspace{0.7em}
+      \sectionlabel{The research question}
+      \begin{tightitemize}
+        \item Does replacing electrical ICI with photonics only scale energy and latency?
+        \item Or does it make new distributed mappings and compiler choices optimal?
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \begin{tikzpicture}[node distance=0.66cm, every node/.style={font=\scriptsize}]
+        \tikzstyle{box}=[rounded corners, draw=Photon, thick, fill=Mist, align=center, inner sep=5pt, text width=0.92\linewidth]
+        \node[box] (source) {Public specs + project assumptions};
+        \node[box, below=of source] (af) {AccelForge architecture + workload mapping};
+        \node[box, below=of af] (net) {Topology-aware network model};
+        \node[box, below=of net] (loop) {Logical-memory feedback loop};
+        \node[box, below=of loop] (superpod) {Cluster, TPU cube, compiler, scaling, chiplet, SuperPod studies};
+        \draw[->, thick, color=Photon] (source) -- (af);
+        \draw[->, thick, color=Photon] (af) -- (net);
+        \draw[->, thick, color=Photon] (net) -- (loop);
+        \draw[->, thick, color=Photon] (loop) -- (superpod);
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{What Was Modeled and Where It Came From}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \sectionlabel{Photonic technology points}
+      \begin{tabularx}{\linewidth}{lrrc}
+        \toprule
+        Tech & BW & Energy & MC \\
+        \midrule
+        Electrical 800G & 0.8T & 10.0 & no \\
+        Chiplet 3.5T & 3.5T & 6.0/hop & no \\
+        EVK50 & 0.8T & 4.6 & yes \\
+        EVK100 & 3.2T & 1.9 & yes \\
+        L200 & 16.0T & 4.5 & yes \\
+        L200X & 32.0T & 4.8 & yes \\
+        M1000 & 57.3T & 2.3 & yes+OCS \\
+        \bottomrule
+      \end{tabularx}
+      \vspace{0.3em}
+
+      {\tiny MC = native multicast. BW is one-way per modeled link/chip.}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \sectionlabel{Source trail}
+      \begin{tightitemize}
+        \item Lightmatter EVK50, EVK100, L200/L200X, M1000 product and SC25/OCP material.
+        \item Google TPU v5p and TPU7x/Ironwood documentation plus Hot Chips 2025 rack tutorial.
+        \item XLA/GSPMD motivation from PyTorch/XLA SPMD documentation.
+        \item Gemini 3/3.1/Flash/Deep Think public posts: used only to motivate proxy workloads, since parameter counts are not public.
+        \item Advanced chiplet baseline: prompt-specified 3.5 \tbps{} one-way, 6 \pjbit{} per hop.
+      \end{tightitemize}
+      \vspace{0.4em}
+      \smallsource{\code{results/sources.csv}; \code{results/summary.md}}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[shrink=4]{Codebase and Reproduction Surface}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.55\textwidth}
+      \sectionlabel{Main implementation}
+      \begin{tabularx}{\linewidth}{lY}
+        \toprule
+        File & Role \\
+        \midrule
+        \code{scripts/lightmatter\_interconnects.py} & Topologies, technology catalog, AccelForge loop, compiler model, scaling, chiplet, SuperPod studies, CLI. \\
+        \code{scripts/generate\_lightmatter\_notebook.py} & Rebuilds the executed exploratory notebook. \\
+        \code{arch/tpu\_lightmatter\_cluster.yaml} & Logical cluster memory, node array, HBM, UB, register, MAC. \\
+        \code{workload/single\_matmul.yaml} & Parameterized GEMM template for M/K/N/bits. \\
+        \code{tests/test\_lightmatter\_project.py} & 70 unit/integration tests. \\
+        \bottomrule
+      \end{tabularx}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \sectionlabel{Exact commands}
+      \begin{block}{Dockerized workflow}
+        \code{make validate}\\
+        \code{make study}\\
+        \code{make inference}\\
+        \code{make training}\\
+        \code{make superpod}\\
+        \code{make notebook}
+      \end{block}
+      \vspace{0.4em}
+      {\scriptsize All targets run inside \code{timeloopaccelergy/accelforge:latest-amd64}. The notebook has 80 executed cells and the current test suite has 70 passing tests.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{AccelForge Setup: Logical Cluster Memory}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \sectionlabel{Architecture model}
+      \begin{tightitemize}
+        \item \code{LogicalClusterMemory}: union of all accelerator memories.
+        \item \code{NodeArray}: 2-D or 3-D accelerator grid, including TPU cube \code{NodeZ}.
+        \item \code{HBM}: local accelerator memory.
+        \item \code{UnifiedBuffer}, \code{Register}, \code{MAC}: local compute hierarchy.
+        \item Communication scenario controls which tensors live in logical memory versus local HBM.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \sectionlabel{Workload model}
+      \begin{block}{Parameterized GEMM}
+        \[
+          \text{Outputs}_{m,n} =
+          \sum_k \text{Activations}_{m,k}\,\text{Weights}_{k,n}
+        \]
+      \end{block}
+      \begin{tightitemize}
+        \item \code{decode\_mlp}: weight movement dominates.
+        \item \code{kv\_attention}: smaller attention traffic, latency-sensitive.
+        \item \code{prefill\_projection}: large activation and output movement.
+      \end{tightitemize}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.45em}
+  \begin{center}
+    {\scriptsize Class connection: this is the usual accelerator hierarchy and mapper loop, except the top memory level is made network-aware instead of assumed to be a free global memory.}
+  \end{center}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Network Model and Fixed-Point Feedback}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \sectionlabel{Traffic cases}
+      \begin{tightitemize}
+        \item \code{node\_to\_node}: activation/output exchange.
+        \item \code{node\_to\_dram}: remote weight/state fetch.
+        \item \code{shared\_dram\_multicast}: one logical source fans out to many nodes.
+      \end{tightitemize}
+
+      \vspace{0.55em}
+      \sectionlabel{Topology cost}
+      \[
+        E_{\text{net}} = B_{\text{eff}} \cdot H \cdot e_{\text{bit}},
+        \quad
+        L_{\text{net}} = \frac{B_{\text{eff}}}{BW / C} + H L_{\text{router}}
+      \]
+      {\scriptsize $H$ is hop count, $C$ is contention, and $B_{\text{eff}}$ collapses repeated fanout only when native multicast exists.}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \sectionlabel{Iterative AccelForge loop}
+      \begin{tightenumerate}
+        \item Initialize logical memory as HBM-like.
+        \item Run AccelForge mapper.
+        \item Extract tensor traffic from the mapping.
+        \item Evaluate topology + technology network cost.
+        \item Add network cost to logical read/write energy and latency.
+        \item Rerun until costs stabilize.
+      \end{tightenumerate}
+      \vspace{0.4em}
+      \begin{block}{Why this matters}
+        The mapper can react to the network model. The project reports both the first-run network penalty and the final fixed-point result.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Topology Space}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.59\textwidth}
+      \includegraphics[width=\linewidth]{03_topology_diagram.png}
+    \end{column}
+    \begin{column}{0.37\textwidth}
+      \sectionlabel{Modeled designs}
+      \begin{tightitemize}
+        \item Electrical 4x4 mesh for the 16-node class-scale cluster.
+        \item TPU-like 4x4x4 3-D torus cube.
+        \item EVK100 photonic torus: same topology, upgraded links.
+        \item L200/L200X/M1000 optical switched fabric: flatter single-hop fabric.
+        \item Advanced chiplet torus: stronger electrical baseline.
+      \end{tightitemize}
+      \vspace{0.4em}
+      {\scriptsize The important split is topology vs link technology: EVK100 torus keeps hop structure; M1000 switched fabric changes hop structure and multicast economics.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Milestone 1 and 2: 16-Node AccelForge Study}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.61\textwidth}
+      \includegraphics[width=\linewidth]{01_cluster_reductions.png}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \sectionlabel{EVK100 crossbar vs electrical mesh}
+      {\scriptsize
+      \begin{tabularx}{\linewidth}{Yrr}
+        \toprule
+        Scenario & Energy & Latency \\
+        \midrule
+        node-to-DRAM & 67.91\% & 91.84\% \\
+        node-to-node & 9.40\% & 0.00\% \\
+        shared multicast & 72.21\% & 97.57\% \\
+        \bottomrule
+      \end{tabularx}}
+
+      \vspace{0.7em}
+      \begin{block}{Interpretation}
+        Photonics help most when the logical memory access is remote or shared. They help least when the workload is already mostly local compute/HBM.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[shrink=5]{Milestone 2: Did the Mapping Itself Move?}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \sectionlabel{Conservative AccelForge result}
+      \begin{tightitemize}
+        \item In the TPU cube fixed-point mapper, photonic cases did \alert{not} change compact tile/residency signatures in 24 tested cases.
+        \item This is not a failure: the GEMM micro-mapping is dominated by local UB/register/MAC reuse for the tested tensor shapes.
+        \item The pipeline explicitly reports this instead of hiding it.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \sectionlabel{Higher-level mapping result}
+      \begin{tabularx}{\linewidth}{lYrr}
+        \toprule
+        Workload & Photonic architecture & New mapping & Gain \\
+        \midrule
+        prefill & 16-node EVK100 & multicast & 10.08\% \\
+        prefill & TPU EVK100 torus & multicast & 11.36\% \\
+        prefill & TPU L200 fabric & multicast & 11.38\% \\
+        prefill & TPU L200X fabric & multicast & 11.37\% \\
+        prefill & TPU M1000 fabric & multicast & 11.39\% \\
+        \bottomrule
+      \end{tabularx}
+      \vspace{0.25em}
+      {\scriptsize Changed distributed mappings: 5 of 16. Baseline mapping is node-to-node.}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.45em}
+  \begin{block}{Key nuance}
+    The inner AccelForge tile choice can remain stable while the \emph{distributed memory placement} changes. That is exactly the compiler-level effect the project was designed to expose.
+  \end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Milestone 3: TPU Cube ICI Replacement}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.60\textwidth}
+      \includegraphics[width=\linewidth]{02_tpu_mapping_reductions.png}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \sectionlabel{64-chip 4x4x4 cube}
+      \begin{tabularx}{\linewidth}{lRR}
+        \toprule
+        Variant & Best E & Best L \\
+        \midrule
+        EVK100 torus & 99.70\% & 99.61\% \\
+        L200 switched & 99.82\% & 99.98\% \\
+        L200X switched & 99.81\% & 99.99\% \\
+        M1000 switched & 99.91\% & 99.99\% \\
+        \bottomrule
+      \end{tabularx}
+
+      \vspace{0.55em}
+      {\scriptsize Best cases are shared-weight/state multicast. M1000 also gives 92.45\% energy and 99.65\% latency reduction for all-to-all shard exchange.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[shrink=5]{Compiler/Dataflow: Where the New Paradigm Appears}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.58\textwidth}
+      \includegraphics[width=\linewidth]{04_compiler_strategy_choices.png}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \sectionlabel{Modeled compiler choices}
+      \begin{tightitemize}
+        \item XLA/GSPMD tensor-parallel collective.
+        \item Remote pooled-HBM streaming.
+        \item Replicated local HBM cache.
+        \item Photonic multicast cache fill.
+        \item MoE locality-aware routing.
+      \end{tightitemize}
+      \vspace{0.45em}
+      \begin{tabularx}{\linewidth}{lY}
+        \toprule
+        Case & Best changed strategy \\
+        \midrule
+        decode MLP / M1000 & remote HBM, 67.21\% E gain \\
+        KV attention / M1000 & remote HBM, 67.75\% E gain \\
+        prefill / EVK100 & multicast cache, 45.43\% E gain \\
+        prefill / M1000 & remote HBM, 53.31\% E gain \\
+        \bottomrule
+      \end{tabularx}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Scaling Laws: Why Cube Size and SuperPod Size Matter}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.58\textwidth}
+      \includegraphics[width=\linewidth]{05_scaling_laws.png}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \sectionlabel{Log-log per-chip scaling exponent}
+      {\scriptsize
+      \begin{tabularx}{\linewidth}{Yrr}
+        \toprule
+        Architecture / traffic & Energy & Latency \\
+        \midrule
+        TPU torus / all-to-all & 0.336 & 0.333 \\
+        TPU torus / multicast & 1.295 & 1.333 \\
+        Chiplet torus / multicast & 1.295 & 1.333 \\
+        EVK100 torus / multicast & 0.295 & 0.333 \\
+        M1000 switched / both & 0.000 & 0.000 \\
+        \bottomrule
+      \end{tabularx}}
+      \vspace{0.55em}
+      \begin{block}{Interpretation}
+        Torus fabrics accumulate hop and contention cost as cubes grow. A flat switched optical fabric makes the modeled per-chip network cost nearly independent of system size.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Against a Stronger Baseline: Advanced Chiplet}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.58\textwidth}
+      \includegraphics[width=\linewidth]{06_chiplet_baseline.png}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \sectionlabel{Prompt-specified baseline}
+      \begin{tightitemize}
+        \item One-way bandwidth: 3.5 \tbps{}.
+        \item Energy: 6 \pjbit{} per network hop.
+        \item No native optical multicast.
+      \end{tightitemize}
+      \vspace{0.45em}
+      \begin{tabularx}{\linewidth}{lRR}
+        \toprule
+        M1000 vs chiplet & Energy & Latency \\
+        \midrule
+        all-to-all & 87.42\% & 98.47\% \\
+        weight refill & 90.42\% & 98.47\% \\
+        shared state & 99.85\% & 99.98\% \\
+        \bottomrule
+      \end{tabularx}
+      \vspace{0.45em}
+      {\scriptsize EVK100 torus is energy-efficient but can be slower than chiplet for unicast because it preserves torus hop structure.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Full 9216-Chip Study: What Is Being Claimed}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.51\textwidth}
+      \sectionlabel{Public hardware target}
+      \begin{tightitemize}
+        \item TPU7x/Ironwood pod: 9216 chips.
+        \item Per-chip public specs used in the model: 2307 BF16 TFLOP/s, 4614 FP8 TFLOP/s, 192 GiB HBM, 7380 GiB/s HBM BW, 1200 GB/s bidirectional ICI.
+        \item Modeled baseline: Ironwood electrical torus + XLA SPMD.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \sectionlabel{Public Gemini-class proxies}
+      \begin{tightitemize}
+        \item Google does not publish Gemini 3/3.1 parameter counts or expert layouts.
+        \item The study therefore uses explicit proxy workloads:
+        \item sparse MoE Pro-class proxy;
+        \item long-context Deep Think proxy;
+        \item inference requests and training-token steps.
+      \end{tightitemize}
+      \vspace{0.35em}
+      {\scriptsize The deck reports modeled proxy behavior, not confidential Google internals.}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.65em}
+  \begin{block}{Modeled configurations}
+    Ironwood electrical torus, advanced chiplet torus, EVK100 photonic torus + multicast cache, M1000 switched topology only, and M1000 full photonic compiler stack.
+  \end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{End-to-End SuperPod Results}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.58\textwidth}
+      \includegraphics[width=\linewidth]{07_superpod_end_to_end_speedups.png}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \sectionlabel{Best M1000 full-stack results}
+      {\scriptsize
+      \begin{tabularx}{\linewidth}{Yrr}
+        \toprule
+        Model / phase & Speedup & Energy \\
+        \midrule
+        Deep Think inference & 14.50x & 51.07\% \\
+        Deep Think training & 1.43x & 0.67\% \\
+        Gemini 3.1 inference & 11.02x & 45.27\% \\
+        Gemini 3.1 training & 1.42x & 0.54\% \\
+        \bottomrule
+      \end{tabularx}}
+      \vspace{0.55em}
+      \begin{block}{Why inference wins harder}
+        Inference has exposed network latency, KV/cache movement, expert routing, and multicast opportunities. Training has larger compute and HBM terms, so network removal gives smaller end-to-end energy gains.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Where the Latency Went}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.60\textwidth}
+      \includegraphics[width=\linewidth]{08_superpod_stage_breakdown.png}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \sectionlabel{Network share collapse}
+      {\scriptsize
+      \begin{tabularx}{\linewidth}{Yrr}
+        \toprule
+        Deep Think inference & Net E & Net L \\
+        \midrule
+        Electrical & 49.81\% & 90.67\% \\
+        Chiplet & 37.32\% & 67.50\% \\
+        EVK100 torus+MC & 9.41\% & 48.90\% \\
+        M1000 topology only & 1.23\% & 0.58\% \\
+        M1000 full stack & 0.32\% & 0.07\% \\
+        \bottomrule
+      \end{tabularx}}
+
+      \vspace{0.55em}
+      {\scriptsize Once network latency is mostly gone, the remaining bottleneck is compute + HBM, so further interconnect improvements have diminishing returns.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[shrink=4]{Ablation Ladder: What Each Technique Adds}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \sectionlabel{Deep Think inference}
+      \begin{tabularx}{\linewidth}{lRR}
+        \toprule
+        Technique & Speedup & Step \\
+        \midrule
+        baseline & 1.00x & 1.00x \\
+        advanced chiplet & 3.65x & 3.65x \\
+        photonic torus + multicast & 6.09x & 1.67x \\
+        switched topology only & 12.02x & 1.97x \\
+        multicast cache & 12.76x & 1.06x \\
+        remote pooled HBM & 13.29x & 1.04x \\
+        MoE locality routing & 13.64x & 1.03x \\
+        full compiler stack & 14.50x & 1.06x \\
+        \bottomrule
+      \end{tabularx}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \sectionlabel{Reading the ablation}
+      \begin{tightitemize}
+        \item The biggest jump is moving from electrical to high-quality chiplet or photonic links.
+        \item The second biggest jump is topology: M1000 switched fabric eliminates most exposed network latency.
+        \item Compiler effects are smaller in isolation, but still matter after topology because they reduce cache/expert placement overhead.
+        \item Training has the same ordering but lower magnitude: Deep Think training reaches 1.43x.
+      \end{tightitemize}
+      \vspace{0.45em}
+      \begin{block}{Core conclusion}
+        Better interconnect enables the compiler to choose remote pooled HBM, multicast cache fill, and locality routing without paying torus fanout penalties.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Long-Context Inference Scaling}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.58\textwidth}
+      \includegraphics[width=\linewidth]{09_superpod_context_scaling.png}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \sectionlabel{Gemini 3.1 proxy context sweep}
+      \begin{tabularx}{\linewidth}{rRR}
+        \toprule
+        Context & M1000 speedup & Energy \\
+        \midrule
+        4K & 13.58x & 58.91\% \\
+        16K & 9.38x & 43.80\% \\
+        32K & 8.08x & 37.58\% \\
+        128K & 5.40x & 24.97\% \\
+        1M & 2.27x & 6.80\% \\
+        \bottomrule
+      \end{tabularx}
+      \vspace{0.55em}
+      \begin{block}{Interpretation}
+        Photonics preserves an advantage at long context, but the model gradually becomes dominated by unavoidable compute/HBM movement rather than network fanout.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Generated Deliverables}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \sectionlabel{Primary outputs}
+      \begin{tightitemize}
+        \item \code{lightmatter\_interconnects.ipynb}: executed exploratory notebook.
+        \item \code{results/cluster\_*.csv}: 16-node AccelForge cluster.
+        \item \code{results/tpu\_*.csv}: 64-chip TPU cube ICI replacement.
+        \item \code{results/optimal\_mapping\_choices.csv}: distributed mapping selector.
+        \item \code{results/compiler\_strategy\_study.csv}: XLA/Pallas-style strategy sweep.
+        \item \code{results/scaling\_*.csv}: 64-to-9216-chip scaling laws.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \sectionlabel{Presentation/report outputs}
+      \begin{tightitemize}
+        \item \code{results/chiplet\_comparison.csv}: 3.5 \tbps{} / 6 \pjbit{} baseline.
+        \item \code{results/superpod\_stage\_study.csv}: stage-level model.
+        \item \code{results/superpod\_end\_to\_end\_summary.csv}: total speedups.
+        \item \code{results/superpod\_ablation\_study.csv}: technique ladder.
+        \item \code{results/inference\_*}, \code{training\_*}: phase-specific workflows.
+        \item \code{results/presentation/*.png}: nine condensed figures used in this deck.
+      \end{tightitemize}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.5em}
+  \begin{center}
+    {\scriptsize The deliverables are generated, not hand-entered: re-run with \code{make validate}.}
+  \end{center}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[shrink=4]{Limitations and Validity Checks}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \sectionlabel{Validity checks}
+      \begin{tightitemize}
+        \item 70 tests cover constants, topology hop counts, multicast behavior, fixed-point solver, CSV writers, notebook structure, compiler strategies, scaling, chiplet, and SuperPod workflows.
+        \item \code{make validate} runs tests and regenerates the full artifact set.
+        \item Phase-specific outputs are checked: inference-only, training-only, combined SuperPod.
+        \item The paper source compiles after synchronization with the 70-test suite.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \sectionlabel{Modeling limits}
+      \begin{tightitemize}
+        \item Not RTL, packet-level, or thermal simulation.
+        \item Gemini workloads are explicit proxies because model internals are not public.
+        \item Photonic multicast and OCS behavior are modeled analytically from public product specs.
+        \item Physical integration, scheduling overheads, cost, reliability, and laser sharing are outside the current model.
+      \end{tightitemize}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.55em}
+  \begin{block}{Why the conclusions are still useful}
+    The model is deliberately transparent: every assumption is in the source table or code, every result is regenerated from the repo, and the qualitative conclusion is tied to traffic shape, hop count, multicast, and compiler choices rather than a hidden black-box simulator.
+  \end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Final Takeaways}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.33\textwidth}
+      \metriccard{Not universal}{Training speedup is modest}{Best modeled training speedup is 1.43x because compute dominates after collectives are reduced.}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \metriccard{Very strong for inference}{Network-heavy stages move}{Best modeled inference speedup is 14.50x; network latency share falls from 90.67\% to 0.07\%.}
+    \end{column}
+    \begin{column}{0.28\textwidth}
+      \metriccard{New mappings}{The compiler should adapt}{Shared multicast, pooled HBM, cache fill, and MoE locality become attractive under photonics.}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.95em}
+  \begin{block}{Bottom line}
+    Lightmatter-style photonic interconnects are most compelling when they change the memory/dataflow problem: large fanout, long context, expert routing, shared state, and remote cache movement. The project shows both the constant-factor link gains and the deeper mapping/compiler gains needed for a convincing accelerator-architecture story.
+  \end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\appendix
+\begin{frame}{Backup: Figure Index}
+  \begin{tabularx}{\linewidth}{lY}
+    \toprule
+    Figure & Meaning \\
+    \midrule
+    \code{01\_cluster\_reductions.png} & 16-node EVK100 optical crossbar gains. \\
+    \code{02\_tpu\_mapping\_reductions.png} & TPU cube fixed-point mapping-aware gains. \\
+    \code{03\_topology\_diagram.png} & Topology comparison. \\
+    \code{04\_compiler\_strategy\_choices.png} & XLA/Pallas-style strategy changes. \\
+    \code{05\_scaling\_laws.png} & 64-to-9216-chip scaling-law slopes. \\
+    \code{06\_chiplet\_baseline.png} & Advanced chiplet comparison. \\
+    \code{07\_superpod\_end\_to\_end\_speedups.png} & Full-SuperPod speedups. \\
+    \code{08\_superpod\_stage\_breakdown.png} & SuperPod latency/energy breakdown. \\
+    \code{09\_superpod\_context\_scaling.png} & Long-context inference scaling. \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{Backup: Reproduction Checklist}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \sectionlabel{Environment}
+      \begin{tightitemize}
+        \item Repo root: \code{final-project/}
+        \item Docker image: \code{timeloopaccelergy/accelforge:latest-amd64}
+        \item Main working directory inside container: \code{/home/workspace/workspace/final\_project}
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \sectionlabel{Commands}
+      \begin{tightitemize}
+        \item \code{make test}: 70-test validation suite.
+        \item \code{make study}: all CSV, Markdown, and plot artifacts.
+        \item \code{make inference/training/superpod}: phase workflows.
+        \item \code{make notebook}: regenerate and execute notebook.
+        \item \code{make validate}: production path used for this deck.
+      \end{tightitemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\end{document}
