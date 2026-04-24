@@ -2593,6 +2593,13 @@ def write_superpod_workflow_outputs(
         f"Active chips: {active_chips}",
         f"Models: {', '.join(selected_models)}",
         "",
+        "## Modeling Notes",
+        "",
+        "- The topology model is not a pure bandwidth scalar: hop count, contention, router latency, and multicast support all affect transfer cost.",
+        "- Stage latency uses an exposed-stall model, `T_stage = max(T_compute, T_HBM) + (1 - overlap) * T_network`, so faster optical links can reduce both raw transport time and visible stalls.",
+        "- In TPU/XLA terms, `node_to_node` corresponds to collective activation exchange, `node_to_dram` corresponds to remote HBM or KV fetch, and `shared_dram_multicast` corresponds to broadcast cache fill of shared state.",
+        "- The model is analytic rather than packet-level and does not simulate queueing or OCS reconfiguration timing.",
+        "",
         "## Best Configurations",
         "",
     ]
@@ -2944,7 +2951,31 @@ def generate_summary_markdown(
             f"{tech.energy_per_bit_j*1e12:.1f} | Yes |"
         )
 
-    lines.extend(["", "## Cluster Study Highlights (16-node system)", ""])
+    lines.extend([
+        "",
+        "## Modeling Notes",
+        "",
+        "- The topology model is **not** a pure bandwidth multiplier. Network energy and latency depend on topology-specific hop count, contention-driven bandwidth derating, per-hop router latency, and whether the fabric supports true multicast.",
+        "- In the AccelForge fixed-point loop, network read/write energy and latency are folded back into the logical cluster-memory level and the mapper is rerun until the logical-memory costs stabilize.",
+        "- In the full-superpod model, only exposed network time stalls execution: `T_stage = max(T_compute, T_HBM) + (1 - overlap) * T_network`. Optical configurations therefore help in two ways: they reduce raw network time and they enable more communication/computation overlap through better data placement and cache-fill strategies.",
+        "- The model is intentionally analytic rather than packet-level: it does not include VC arbitration, queueing transients, or explicit OCS reconfiguration timing.",
+        "",
+        "## TPU-Speak Translation",
+        "",
+        "| Project term | TPU/XLA analogy | Meaning in this project |",
+        "|---|---|---|",
+        "| `node_to_node` | GSPMD collective-permute / sequence- or tensor-sharded activation exchange | Activations/outputs stay sharded and are exchanged directly among chips. |",
+        "| `node_to_dram` | Remote HBM / remote KV / remote optimizer-state fetch | A chip reads model state from a remote memory tier instead of relying only on local residency. |",
+        "| `shared_dram_multicast` | Broadcast cache fill / replicated hot-state refill | One logical weight/KV/expert payload fans out to many chips; optics can charge only the unique payload. |",
+        "| `xla_spmd_collective` | Baseline XLA/GSPMD sharding plan | Classic sharded tensors plus collectives over the mesh/torus. |",
+        "| `remote_hbm_streaming` | Pooled-HBM streaming schedule | Compiler prefers remote reads over local replication when the network is cheap enough. |",
+        "| `photonic_multicast_cache` | Optical broadcast prefetch | Compiler fills many local caches with one multicast transfer before compute. |",
+        "| `moe_dispatch` / `moe_locality_routing` | Expert-parallel token routing | Expert dispatch/combine traffic and expert placement choices for MoE models. |",
+        "| `gradient_sync` | Reduce-scatter / all-reduce | Training collective over active parameters. |",
+        "",
+        "## Cluster Study Highlights (16-node system)",
+        "",
+    ])
     for scenario in cluster_improvement_df["scenario"].unique():
         sdf = cluster_improvement_df[cluster_improvement_df["scenario"] == scenario]
         be = sdf.loc[sdf["energy_reduction_pct"].idxmax()]
@@ -3455,8 +3486,31 @@ def write_presentation_assets(
             f"- **{row.category} / {row.metric}**: {row.value:.2f} {row.unit} "
             f"for `{row.case}`. {row.interpretation}"
         )
+    lines.extend([
+        "",
+        "## Modeling Notes",
+        "",
+        "- Topology is not modeled as a pure bandwidth problem: the network model includes hop count, contention, per-hop router latency, and multicast semantics.",
+        "- The AccelForge loop feeds network read/write energy and latency back into the logical memory level and reruns until convergence, so the mapper can react to in-flight data cost rather than seeing a free global memory.",
+        "- The full-superpod stage model converts raw transport time into exposed stall via `exposed_network_latency = raw_network_latency * (1 - network_overlap)`; this is how optical IC affects both transport time and stall time.",
+        "- The analytic model does not include packet-level queueing or OCS reconfiguration timing.",
+    ])
     if optimal_mapping_df is not None and not optimal_mapping_df.empty:
-        lines.extend(["", "## Optimal Distributed Mapping Choices", ""])
+        lines.extend([
+            "",
+            "## TPU-Speak Translation",
+            "",
+            "- `node_to_node`: GSPMD collective-permute / sequence- or tensor-sharded activation exchange.",
+            "- `node_to_dram`: remote HBM / remote KV / remote optimizer-state fetch.",
+            "- `shared_dram_multicast`: broadcast cache fill / replicated hot-state refill.",
+            "- `xla_spmd_collective`: baseline XLA/GSPMD sharding and collectives.",
+            "- `remote_hbm_streaming`: pooled-HBM streaming schedule.",
+            "- `photonic_multicast_cache`: optical broadcast prefetch to many local caches.",
+            "- `moe_dispatch` / `moe_locality_routing`: expert-parallel token routing and placement.",
+            "",
+            "## Optimal Distributed Mapping Choices",
+            "",
+        ])
         for row in optimal_mapping_df.itertuples(index=False):
             changed = getattr(row, "optimal_mapping_changed_vs_baseline", False)
             changed_text = "changed" if changed else "same as baseline"

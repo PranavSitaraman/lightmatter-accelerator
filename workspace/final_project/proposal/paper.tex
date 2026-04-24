@@ -229,6 +229,12 @@ The model uses \(C(N)=\sqrt{N}\) for a 2-D mesh, \(C(N)=\sqrt[3]{N}\) for a
 3-D torus, and \(C(N)=1\) for an optical crossbar. For shared multicast, a
 non-multicast technology pays repeated unicast volume, while a multicast-capable
 photonic technology pays only the unique payload volume.
+This is therefore not a pure bandwidth-substitution model. The topology enters
+through hop count, contention, router latency, and multicast semantics. In
+particular, EVK100 and the electrical baseline can have similar logical traffic
+types but different costs because the torus still accumulates hop and
+contention terms, while L200/L200X/M1000 switched fabrics flatten the path to a
+single logical hop and avoid repeated multicast fanout.
 
 \subsection{Iterative AccelForge integration}
 AccelForge does not natively model a cluster network topology. The project
@@ -244,6 +250,12 @@ each mapper run:
 \end{enumerate}
 This implements Milestone 2 directly: the mapper sees network-augmented memory
 costs, not a post-hoc energy adjustment.
+The latency term here is also the mechanism by which the project captures
+stalls from data that is still in flight. If remote traffic becomes expensive,
+the logical memory level becomes slower and the mapper can respond by changing
+the best placement or communication pattern. The model is intentionally
+coarse-grained, however: it does not simulate packet-level queueing, virtual
+channel arbitration, or optical-switch reconfiguration timing.
 
 \subsection{Compiler/dataflow model}
 The project explicitly separates two layers:
@@ -259,6 +271,26 @@ This distinction is important because the AccelForge inner mapping can remain
 stable while the best distributed dataflow changes. That is exactly what the
 results show: the fixed-point tile signatures are conservative, but the best
 distributed mapping and compiler strategy change for photonic systems.
+
+\begin{table}[H]
+\centering
+\caption{Translation from project terminology to TPU/XLA-style distributed dataflows.}
+\label{tab:tpu-speak}
+\footnotesize
+\begin{tabularx}{\linewidth}{lX}
+\toprule
+Project term & TPU/XLA interpretation \\
+\midrule
+\code{node\_to\_node} & Tensor- or sequence-sharded activation exchange, such as collective-permute or all-to-all between chips. \\
+\code{node\_to\_dram} & Remote HBM access, including remote KV-cache fetches, streamed weights, or remote optimizer-state traffic. \\
+\code{shared\_dram\_multicast} & Broadcast cache fill of shared weights, expert state, or hot activations into many local memories. \\
+\code{xla\_spmd\_collective} & Baseline GSPMD-style sharded tensors with explicit collectives. \\
+\code{remote\_hbm\_streaming} & Compiler schedule that treats remote pooled HBM as an additional usable memory tier. \\
+\code{photonic\_multicast\_cache} & Compiler-visible multicast prefetch or replicated hot-state refill enabled by native optical fanout. \\
+\code{moe\_locality\_routing} & Expert placement and dispatch chosen to reduce expert-parallel all-to-all traffic. \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 \subsection{Full-superpod stage model}
 For the end-to-end model, each stage is decomposed into compute, HBM, and
@@ -277,6 +309,15 @@ configuration parameters. Better compiler/dataflow strategies increase compute
 efficiency by reducing stalls and improving placement. Thus the superpod model
 captures a downstream compiler benefit: photonics does not only reduce network
 energy; it also keeps compute fed more consistently.
+The exposed network term is the project's explicit stall model: raw network
+latency is multiplied by \((1-\alpha_{\text{overlap}})\) before it is added to
+the critical path. The baseline electrical superpod uses
+\(\alpha_{\text{overlap}}=0.35\), while the full M1000 photonic stack reaches
+\(\alpha_{\text{overlap}}=0.78\), reflecting the idea that flatter multicast
+and remote-memory schedules hide more of the transfer behind useful compute.
+This remains an analytical overlap model rather than a cycle-accurate network
+simulator, so the paper should be interpreted as a rigorous architecture study,
+not a claim about packet-by-packet switch behavior.
 
 The modeled stages are:
 \begin{itemize}
@@ -308,7 +349,11 @@ per chip \cite{tpu7x}.
 The AccelForge workloads are GEMM proxies for decode MLP, KV attention,
 prefill projection, long-context prefill, MoE dispatch, and training
 weight-gradient accumulation. The superpod workloads are shown in
-\tabref{tab:proxies}.
+\tabref{tab:proxies}. In TPU terms, prefill corresponds to tensor-parallel
+activation exchange, decode KV attention corresponds to remote KV-cache fetch,
+decode weight/expert refill corresponds to multicast cache fill or pooled-HBM
+streaming, gradient synchronization corresponds to reduce-scatter/all-reduce,
+and MoE dispatch corresponds to expert-parallel all-to-all.
 
 \begin{table}[H]
 \centering

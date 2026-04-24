@@ -31,6 +31,23 @@ This folder contains the condensed final-project deliverables for slides or a sh
 - **Full superpod end-to-end / Best energy reduction**: 51.07 % for `Gemini 3 Deep Think long-context proxy / inference`. End-to-end compute + HBM + network energy, including compiler/dataflow effects.
 - **Superpod ablation / Largest final-step increment**: 1.06 x vs previous for `Gemini 3 Deep Think long-context proxy / inference`. Incremental effect after topology, multicast, remote HBM, and MoE-locality ablations.
 
+## Modeling Notes
+
+- Topology is not modeled as a pure bandwidth problem: the network model includes hop count, contention, per-hop router latency, and multicast semantics.
+- The AccelForge loop feeds network read/write energy and latency back into the logical memory level and reruns until convergence, so the mapper can react to in-flight data cost rather than seeing a free global memory.
+- The full-superpod stage model converts raw transport time into exposed stall via `exposed_network_latency = raw_network_latency * (1 - network_overlap)`; this is how optical IC affects both transport time and stall time.
+- The analytic model does not include packet-level queueing or OCS reconfiguration timing.
+
+## TPU-Speak Translation
+
+- `node_to_node`: GSPMD collective-permute / sequence- or tensor-sharded activation exchange.
+- `node_to_dram`: remote HBM / remote KV / remote optimizer-state fetch.
+- `shared_dram_multicast`: broadcast cache fill / replicated hot-state refill.
+- `xla_spmd_collective`: baseline XLA/GSPMD sharding and collectives.
+- `remote_hbm_streaming`: pooled-HBM streaming schedule.
+- `photonic_multicast_cache`: optical broadcast prefetch to many local caches.
+- `moe_dispatch` / `moe_locality_routing`: expert-parallel token routing and placement.
+
 ## Optimal Distributed Mapping Choices
 
 - `decode_mlp` / `Electrical 4x4 Mesh / Electrical 800G/dir` chooses `node_to_node` (same as baseline).

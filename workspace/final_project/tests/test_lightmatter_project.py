@@ -415,10 +415,13 @@ class TestSweepFunctions(unittest.TestCase):
             )
             summary = pd.read_csv(paths["end_to_end_summary"])
             stages = pd.read_csv(paths["stage_study"])
+            workflow_summary = Path(paths["workflow_summary"]).read_text()
             self.assertEqual(set(summary["phase"]), {"inference"})
             self.assertEqual(set(stages["phase"]), {"inference"})
             self.assertIn("context_scaling", paths)
             self.assertTrue(Path(paths["workflow_summary"]).exists())
+            self.assertIn("Modeling Notes", workflow_summary)
+            self.assertIn("collective activation exchange", workflow_summary)
 
     def test_training_workflow_outputs_are_phase_specific(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -430,9 +433,12 @@ class TestSweepFunctions(unittest.TestCase):
             )
             summary = pd.read_csv(paths["end_to_end_summary"])
             stages = pd.read_csv(paths["stage_study"])
+            workflow_summary = Path(paths["workflow_summary"]).read_text()
             self.assertEqual(set(summary["phase"]), {"training"})
             self.assertEqual(set(stages["phase"]), {"training"})
             self.assertNotIn("context_scaling", paths)
+            self.assertTrue(Path(paths["workflow_summary"]).exists())
+            self.assertIn("Modeling Notes", workflow_summary)
             self.assertTrue((summary["speedup_vs_baseline"] >= 1.0).any())
 
 
@@ -643,6 +649,8 @@ class TestArtifactWriter(unittest.TestCase):
             summary = Path(paths["summary"]).read_text()
             self.assertIn("EVK100", summary)
             self.assertIn("M1000", summary)
+            self.assertIn("Modeling Notes", summary)
+            self.assertIn("TPU-Speak Translation", summary)
             self.assertIn("TPU Cube Mapping Adaptation", summary)
             self.assertIn("Optimal Distributed Mapping Choices", summary)
             self.assertIn("Full-Superpod Gemini-Class", summary)
@@ -702,11 +710,14 @@ class TestArtifactWriter(unittest.TestCase):
             tpu_mapping = pd.read_csv(paths["tpu_mapping_study"])
             summary = executive_summary_frame(cluster_imp, tpu_imp, tpu_mapping)
             self.assertFalse(summary.empty)
+            presentation_index = Path(paths["presentation_index"]).read_text()
             self.assertTrue(Path(paths["presentation_index"]).exists())
             self.assertTrue(Path(paths["executive_summary"]).exists())
             self.assertTrue(Path(paths["optimal_mapping_choices"]).exists())
             self.assertTrue(Path(paths["superpod_end_to_end_summary"]).exists())
             self.assertTrue(Path(paths["superpod_context_scaling"]).exists())
+            self.assertIn("Modeling Notes", presentation_index)
+            self.assertIn("TPU-Speak Translation", presentation_index)
 
     def test_optimal_distributed_mapping_frame_detects_candidate_choices(self):
         df = pd.DataFrame([

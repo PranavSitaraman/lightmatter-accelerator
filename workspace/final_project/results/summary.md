@@ -24,6 +24,26 @@ Generated from the AccelForge + photonic-interconnect study pipeline.
 | Lightmatter L200X | 32.0 Tbps | 4.8 | Yes |
 | Lightmatter M1000 | 57.3 Tbps | 2.3 | Yes |
 
+## Modeling Notes
+
+- The topology model is **not** a pure bandwidth multiplier. Network energy and latency depend on topology-specific hop count, contention-driven bandwidth derating, per-hop router latency, and whether the fabric supports true multicast.
+- In the AccelForge fixed-point loop, network read/write energy and latency are folded back into the logical cluster-memory level and the mapper is rerun until the logical-memory costs stabilize.
+- In the full-superpod model, only exposed network time stalls execution: `T_stage = max(T_compute, T_HBM) + (1 - overlap) * T_network`. Optical configurations therefore help in two ways: they reduce raw network time and they enable more communication/computation overlap through better data placement and cache-fill strategies.
+- The model is intentionally analytic rather than packet-level: it does not include VC arbitration, queueing transients, or explicit OCS reconfiguration timing.
+
+## TPU-Speak Translation
+
+| Project term | TPU/XLA analogy | Meaning in this project |
+|---|---|---|
+| `node_to_node` | GSPMD collective-permute / sequence- or tensor-sharded activation exchange | Activations/outputs stay sharded and are exchanged directly among chips. |
+| `node_to_dram` | Remote HBM / remote KV / remote optimizer-state fetch | A chip reads model state from a remote memory tier instead of relying only on local residency. |
+| `shared_dram_multicast` | Broadcast cache fill / replicated hot-state refill | One logical weight/KV/expert payload fans out to many chips; optics can charge only the unique payload. |
+| `xla_spmd_collective` | Baseline XLA/GSPMD sharding plan | Classic sharded tensors plus collectives over the mesh/torus. |
+| `remote_hbm_streaming` | Pooled-HBM streaming schedule | Compiler prefers remote reads over local replication when the network is cheap enough. |
+| `photonic_multicast_cache` | Optical broadcast prefetch | Compiler fills many local caches with one multicast transfer before compute. |
+| `moe_dispatch` / `moe_locality_routing` | Expert-parallel token routing | Expert dispatch/combine traffic and expert placement choices for MoE models. |
+| `gradient_sync` | Reduce-scatter / all-reduce | Training collective over active parameters. |
+
 ## Cluster Study Highlights (16-node system)
 
 ### node_to_dram

@@ -283,6 +283,39 @@
       \begin{block}{Why this matters}
         The mapper can react to the network model. The project reports both the first-run network penalty and the final fixed-point result.
       \end{block}
+      {\scriptsize Not a pure bandwidth swap: hop count, topology contention, per-hop router latency, and native multicast all change the cost seen by the mapper.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Stalls, Overlap, and TPU-Speak}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \sectionlabel{How stalls are modeled}
+      \[
+        T_{\text{stage}} = \max(T_{\text{compute}}, T_{\text{HBM}})
+        + (1-\alpha)T_{\text{network}}
+      \]
+      \begin{tightitemize}
+        \item Raw network time is only partly exposed if compute overlaps it.
+        \item Electrical SuperPod baseline uses $\alpha = 0.35$.
+        \item EVK100 torus + multicast reaches $\alpha = 0.58$.
+        \item Full M1000 stack reaches $\alpha = 0.78$.
+      \end{tightitemize}
+      \vspace{0.35em}
+      {\scriptsize This is a rigorous analytical stall model, not a packet-level simulator with queueing, VC arbitration, or optical-switch retiming.}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \sectionlabel{Translation to TPU/XLA terms}
+      \begin{tightitemize}
+        \item \code{node\_to\_node}: GSPMD tensor/sequence-sharded activation exchange.
+        \item \code{node\_to\_dram}: remote HBM, KV-cache fetch, or optimizer-state fetch.
+        \item \code{shared\_dram\_multicast}: broadcast cache fill of shared weights or hot state.
+        \item \code{remote\_hbm\_streaming}: pooled-HBM schedule instead of forced local residency.
+        \item \code{photonic\_multicast\_cache}: multicast prefetch/replicated refill enabled by optics.
+        \item \code{moe\_locality\_routing}: expert placement to reduce all-to-all pressure.
+      \end{tightitemize}
     \end{column}
   \end{columns}
 \end{frame}
