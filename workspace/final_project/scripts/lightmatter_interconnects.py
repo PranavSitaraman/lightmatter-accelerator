@@ -2596,8 +2596,8 @@ def write_superpod_workflow_outputs(
         "## Modeling Notes",
         "",
         "- The topology model is not a pure bandwidth scalar: hop count, contention, router latency, and multicast support all affect transfer cost.",
-        "- Stage latency uses an exposed-stall model, `T_stage = max(T_compute, T_HBM) + (1 - overlap) * T_network`, so faster optical links can reduce both raw transport time and visible stalls.",
-        "- In TPU/XLA terms, `node_to_node` corresponds to collective activation exchange, `node_to_dram` corresponds to remote HBM or KV fetch, and `shared_dram_multicast` corresponds to broadcast cache fill of shared state.",
+        "- Stage latency uses an exposed-stall model, so faster optical links can reduce both raw transport time and visible stalls.",
+        "- In TPU/XLA terms, node-to-node exchange corresponds to collective activation exchange, node-to-DRAM fetch corresponds to remote HBM or KV fetch, and shared-DRAM multicast corresponds to broadcast cache fill of shared state.",
         "- The model is analytic rather than packet-level and does not simulate queueing or OCS reconfiguration timing.",
         "",
         "## Best Configurations",
@@ -2907,6 +2907,42 @@ def tpu_cube_mapping_study(
 # Summary report generator
 # ---------------------------------------------------------------------------
 
+def humanize_label(value: object) -> str:
+    """Turn stable internal study names into report-ready labels."""
+    text = str(value)
+    replacements = {
+        "decode_mlp": "decode MLP",
+        "kv_attention": "KV attention",
+        "prefill_projection": "prefill projection",
+        "long_context_prefill": "long-context prefill",
+        "moe_dispatch": "MoE dispatch",
+        "training_wgrad": "training weight-gradient accumulation",
+        "node_to_node": "node-to-node exchange",
+        "node_to_dram": "node-to-DRAM fetch",
+        "shared_dram_multicast": "shared-DRAM multicast",
+        "shared_weight_multicast": "shared-weight multicast",
+        "shared_state_multicast": "shared-state multicast",
+        "all_to_all_shard_exchange": "all-to-all shard exchange",
+        "remote_weight_refill": "remote weight refill",
+        "remote_hbm_streaming": "remote-HBM streaming",
+        "photonic_multicast_cache": "photonic multicast cache",
+        "moe_locality_routing": "MoE locality routing",
+        "xla_spmd_collective": "XLA/GSPMD collective",
+        "energy_uJ_per_chip": "energy per chip",
+        "latency_us_per_chip": "latency per chip",
+        "gemini_3_1_release_notes": "Gemini 3.1 release notes",
+        "gemini_3_flash": "Gemini 3 Flash",
+        "gemini_3_deep_think": "Gemini 3 Deep Think",
+        "gemini_3": "Gemini 3",
+        "tpu7x": "TPU7x / Ironwood",
+        "tpu_v5p": "TPU v5p",
+        "ironwood": "Ironwood blog",
+    }
+    for raw, pretty in replacements.items():
+        text = text.replace(raw, pretty)
+    return text.replace(" -> ", " to ")
+
+
 def generate_summary_markdown(
     cluster_df: pd.DataFrame,
     cluster_improvement_df: pd.DataFrame,
@@ -2924,12 +2960,12 @@ def generate_summary_markdown(
     lines: list[str] = [
         "# Lightmatter Final Project — Summary",
         "",
-        "Generated from the AccelForge + photonic-interconnect study pipeline.",
+        "Summary of the AccelForge + photonic-interconnect architecture study.",
         "",
         "## Executive Takeaways",
         "",
         "- The raw network model and the AccelForge fixed-point mapper both show the same direction: optical links help most when traffic leaves a single local HBM bank.",
-        "- Re-running the mapper is explicitly measured: the pipeline reports both fixed-point tile/residency sensitivity and the higher-level distributed mapping choice that becomes optimal under each interconnect.",
+        "- Re-running the mapper is explicitly measured: the study reports both fixed-point tile/residency sensitivity and the higher-level distributed mapping choice that becomes optimal under each interconnect.",
         "- A separate compiler/dataflow strategy model shows the more important effect: photonic multicast can make software-managed cache fills and shared-state broadcast preferable to classic SPMD activation exchange.",
         "- Scaling-law sweeps show that flat switched photonic fabrics keep hop count and contention nearly constant while torus and chiplet fabrics accumulate hop/contention cost as cubes grow toward superpod scale.",
         "- The full-superpod study models Gemini 3/3.1-class public proxy workloads on a 9216-chip Ironwood pod and reports end-to-end inference/training speedups by stage and by optimization ablation.",
@@ -2962,16 +2998,16 @@ def generate_summary_markdown(
         "",
         "## TPU-Speak Translation",
         "",
-        "| Project term | TPU/XLA analogy | Meaning in this project |",
-        "|---|---|---|",
-        "| `node_to_node` | GSPMD collective-permute / sequence- or tensor-sharded activation exchange | Activations/outputs stay sharded and are exchanged directly among chips. |",
-        "| `node_to_dram` | Remote HBM / remote KV / remote optimizer-state fetch | A chip reads model state from a remote memory tier instead of relying only on local residency. |",
-        "| `shared_dram_multicast` | Broadcast cache fill / replicated hot-state refill | One logical weight/KV/expert payload fans out to many chips; optics can charge only the unique payload. |",
-        "| `xla_spmd_collective` | Baseline XLA/GSPMD sharding plan | Classic sharded tensors plus collectives over the mesh/torus. |",
-        "| `remote_hbm_streaming` | Pooled-HBM streaming schedule | Compiler prefers remote reads over local replication when the network is cheap enough. |",
-        "| `photonic_multicast_cache` | Optical broadcast prefetch | Compiler fills many local caches with one multicast transfer before compute. |",
-        "| `moe_dispatch` / `moe_locality_routing` | Expert-parallel token routing | Expert dispatch/combine traffic and expert placement choices for MoE models. |",
-        "| `gradient_sync` | Reduce-scatter / all-reduce | Training collective over active parameters. |",
+            "| Study term | TPU/XLA analogy | Meaning in this project |",
+            "|---|---|---|",
+            "| Node-to-node exchange | GSPMD collective-permute / sequence- or tensor-sharded activation exchange | Activations/outputs stay sharded and are exchanged directly among chips. |",
+            "| Node-to-DRAM fetch | Remote HBM / remote KV / remote optimizer-state fetch | A chip reads model state from a remote memory tier instead of relying only on local residency. |",
+            "| Shared-DRAM multicast | Broadcast cache fill / replicated hot-state refill | One logical weight/KV/expert payload fans out to many chips; optics can charge only the unique payload. |",
+            "| XLA/GSPMD collective | Baseline XLA/GSPMD sharding plan | Classic sharded tensors plus collectives over the mesh/torus. |",
+            "| Remote-HBM streaming | Pooled-HBM streaming schedule | Compiler prefers remote reads over local replication when the network is cheap enough. |",
+            "| Photonic multicast cache | Optical broadcast prefetch | Compiler fills many local caches with one multicast transfer before compute. |",
+            "| MoE dispatch / locality routing | Expert-parallel token routing | Expert dispatch/combine traffic and expert placement choices for MoE models. |",
+            "| Gradient synchronization | Reduce-scatter / all-reduce | Training collective over active parameters. |",
         "",
         "## Cluster Study Highlights (16-node system)",
         "",
@@ -2981,10 +3017,10 @@ def generate_summary_markdown(
         be = sdf.loc[sdf["energy_reduction_pct"].idxmax()]
         bl = sdf.loc[sdf["latency_reduction_pct"].idxmax()]
         lines.extend([
-            f"### {scenario}",
+            f"### {humanize_label(scenario)}",
             "",
-            f"- Best energy reduction: `{be['workload']}` → `{be['energy_reduction_pct']:.2f}%`",
-            f"- Best latency reduction: `{bl['workload']}` → `{bl['latency_reduction_pct']:.2f}%`",
+            f"- Best energy reduction: {humanize_label(be['workload'])} → {be['energy_reduction_pct']:.2f}%",
+            f"- Best latency reduction: {humanize_label(bl['workload'])} → {bl['latency_reduction_pct']:.2f}%",
             "",
         ])
 
@@ -2996,8 +3032,8 @@ def generate_summary_markdown(
         lines.extend([
             f"### {variant}",
             "",
-            f"- Best energy reduction: `{be['case']}` → `{be['energy_reduction_pct']:.2f}%`",
-            f"- Best latency reduction: `{bl['case']}` → `{bl['latency_reduction_pct']:.2f}%`",
+            f"- Best energy reduction: {humanize_label(be['case'])} → {be['energy_reduction_pct']:.2f}%",
+            f"- Best latency reduction: {humanize_label(bl['case'])} → {bl['latency_reduction_pct']:.2f}%",
             "",
         ])
 
@@ -3011,12 +3047,14 @@ def generate_summary_markdown(
             mapping_cases["energy_reduction_vs_electrical_pct"].idxmax()
         ]
         lines.extend([
-            f"- Best mapping-aware TPU-cube energy reduction: `{best_energy['variant']}` on "
-            f"`{best_energy['workload']} / {best_energy['scenario']}` → "
-            f"`{best_energy['energy_reduction_vs_electrical_pct']:.2f}%`.",
+            f"- Best mapping-aware TPU-cube energy reduction: {best_energy['variant']} on "
+            f"{humanize_label(best_energy['workload'])} / {humanize_label(best_energy['scenario'])} → "
+            f"{best_energy['energy_reduction_vs_electrical_pct']:.2f}%.",
             f"- Mapping signatures differed from the electrical baseline in "
-            f"`{len(changed)}` of `{len(mapping_cases)}` photonic mapping cases.",
-            f"- Example final mapping signature: `{best_energy['final_mapping_signature']}`",
+            f"{len(changed)} of {len(mapping_cases)} photonic mapping cases.",
+            "- Representative mapping interpretation: the local GEMM tile stays stable, "
+            "but remote/shared state becomes cheaper at the logical-memory level; the "
+            "larger placement decision is where the photonic advantage appears.",
             "",
         ])
 
@@ -3024,7 +3062,7 @@ def generate_summary_markdown(
         lines.extend([
             "## Optimal Distributed Mapping Choices",
             "",
-            "Here `scenario` is treated as the distributed inference mapping choice: node-to-node activation exchange, node-to-DRAM remote fetch, or shared-DRAM multicast.",
+            "Each row treats the traffic scenario as a distributed inference mapping choice: node-to-node activation exchange, node-to-DRAM remote fetch, or shared-DRAM multicast.",
             "",
             "| Workload | Architecture | Optimal mapping | Changed vs baseline |",
             "|---|---|---|---|",
@@ -3032,8 +3070,8 @@ def generate_summary_markdown(
         for row in optimal_mapping_df.itertuples(index=False):
             changed = getattr(row, "optimal_mapping_changed_vs_baseline", False)
             lines.append(
-                f"| {row.workload} | {row.architecture} | "
-                f"{row.optimal_distributed_mapping} | {bool(changed)} |"
+                f"| {humanize_label(row.workload)} | {humanize_label(row.architecture)} | "
+                f"{humanize_label(row.optimal_distributed_mapping)} | {bool(changed)} |"
             )
         lines.append("")
 
@@ -3048,7 +3086,7 @@ def generate_summary_markdown(
         ])
         for row in optimal_compiler_df.itertuples(index=False):
             lines.append(
-                f"| {row.workload} | {row.architecture} | {row.strategy_label} | "
+                f"| {humanize_label(row.workload)} | {humanize_label(row.architecture)} | {humanize_label(row.strategy_label)} | "
                 f"{bool(row.strategy_changed_vs_baseline)} | "
                 f"{row.energy_gain_vs_baseline_strategy_pct:.2f}% |"
             )
@@ -3065,7 +3103,7 @@ def generate_summary_markdown(
         ])
         for row in scaling_exponents_df.itertuples(index=False):
             lines.append(
-                f"| {row.architecture} | {row.scenario} | {row.metric} | "
+                f"| {humanize_label(row.architecture)} | {humanize_label(row.scenario)} | {humanize_label(row.metric)} | "
                 f"{row.scaling_exponent:.3f} |"
             )
         lines.append("")
@@ -3082,7 +3120,7 @@ def generate_summary_markdown(
         non_baseline = chiplet_df[chiplet_df["architecture"] != "Advanced chiplet torus"]
         for row in non_baseline.itertuples(index=False):
             lines.append(
-                f"| {row.scenario} | {row.architecture} | "
+                f"| {humanize_label(row.scenario)} | {humanize_label(row.architecture)} | "
                 f"{row.energy_reduction_vs_chiplet_pct:.2f}% | "
                 f"{row.latency_reduction_vs_chiplet_pct:.2f}% |"
             )
@@ -3142,7 +3180,10 @@ def generate_summary_markdown(
 
     lines.extend(["## Sources", ""])
     for _, row in source_frame().iterrows():
-        lines.append(f"- **{row['source']}** ({row['date']}): {row['summary']}\n  {row['url']}")
+        lines.append(
+            f"- **{humanize_label(row['source'])}** ({row['date']}): "
+            f"{row['summary']}\n  {row['url']}"
+        )
 
     return "\n".join(lines) + "\n"
 
@@ -3460,23 +3501,20 @@ def write_presentation_assets(
         optimal_mapping_df.to_csv(paths["presentation_optimal_mapping_choices"], index=False)
 
     lines = [
-        "# Presentation Package",
+        "# Presentation Evidence Notes",
         "",
-        "This folder contains the condensed final-project deliverables for slides or a short report.",
+        "These notes summarize the evidence used in the final project presentation and report.",
         "",
-        "## Files",
+        "## Evidence Included",
         "",
-        "- `executive_summary.csv`: headline metrics and interpretations.",
-        "- `01_cluster_reductions.png`: 16-node optical-crossbar gains vs electrical mesh.",
-        "- `02_tpu_mapping_reductions.png`: TPU-cube mapping-aware gains after fixed-point re-optimization.",
-        "- `03_topology_diagram.png`: simplified topology comparison diagram.",
-        "- `04_compiler_strategy_choices.png`: XLA/Pallas-style dataflow choices enabled by photonic multicast.",
-        "- `05_scaling_laws.png`: 64-chip to 9216-chip scaling laws.",
-        "- `06_chiplet_baseline.png`: photonic comparison against the 3.5 Tbps / 6 pJ/bit chiplet baseline.",
-        "- `07_superpod_end_to_end_speedups.png`: full-superpod Gemini-class training/inference speedups.",
-        "- `08_superpod_stage_breakdown.png`: where latency remains after full-stack photonic optimization.",
-        "- `09_superpod_context_scaling.png`: long-context inference scaling for electrical/chiplet/photonic fabrics.",
-        "- `optimal_mapping_choices.csv`: condensed view of which communication mapping each interconnect makes optimal.",
+        "- Headline metrics: the most important energy, latency, scaling, and end-to-end results.",
+        "- Cluster study: 16-node electrical mesh versus optical-crossbar behavior.",
+        "- TPU cube study: mapping-aware ICI replacement for a 64-chip cube.",
+        "- Topology study: visual comparison of mesh, torus, photonic torus, switched optical fabric, and chiplet baselines.",
+        "- Compiler/dataflow study: XLA/GSPMD-style collectives versus remote HBM and photonic multicast cache-fill strategies.",
+        "- Scaling study: 64-chip to 9216-chip per-chip scaling laws.",
+        "- Chiplet comparison: calibration against the 3.5 Tbps / 6 pJ/bit advanced-packaging baseline.",
+        "- SuperPod study: 9216-chip Gemini-class inference/training speedups, stage breakdowns, ablations, and context scaling.",
         "",
         "## Headline Metrics",
         "",
@@ -3484,7 +3522,7 @@ def write_presentation_assets(
     for row in summary_df.itertuples(index=False):
         lines.append(
             f"- **{row.category} / {row.metric}**: {row.value:.2f} {row.unit} "
-            f"for `{row.case}`. {row.interpretation}"
+            f"for {humanize_label(row.case)}. {row.interpretation}"
         )
     lines.extend([
         "",
@@ -3492,7 +3530,7 @@ def write_presentation_assets(
         "",
         "- Topology is not modeled as a pure bandwidth problem: the network model includes hop count, contention, per-hop router latency, and multicast semantics.",
         "- The AccelForge loop feeds network read/write energy and latency back into the logical memory level and reruns until convergence, so the mapper can react to in-flight data cost rather than seeing a free global memory.",
-        "- The full-superpod stage model converts raw transport time into exposed stall via `exposed_network_latency = raw_network_latency * (1 - network_overlap)`; this is how optical IC affects both transport time and stall time.",
+        "- The full-superpod stage model converts raw transport time into exposed stall by multiplying raw network latency by the non-overlapped fraction; this is how optical IC affects both transport time and stall time.",
         "- The analytic model does not include packet-level queueing or OCS reconfiguration timing.",
     ])
     if optimal_mapping_df is not None and not optimal_mapping_df.empty:
@@ -3500,13 +3538,13 @@ def write_presentation_assets(
             "",
             "## TPU-Speak Translation",
             "",
-            "- `node_to_node`: GSPMD collective-permute / sequence- or tensor-sharded activation exchange.",
-            "- `node_to_dram`: remote HBM / remote KV / remote optimizer-state fetch.",
-            "- `shared_dram_multicast`: broadcast cache fill / replicated hot-state refill.",
-            "- `xla_spmd_collective`: baseline XLA/GSPMD sharding and collectives.",
-            "- `remote_hbm_streaming`: pooled-HBM streaming schedule.",
-            "- `photonic_multicast_cache`: optical broadcast prefetch to many local caches.",
-            "- `moe_dispatch` / `moe_locality_routing`: expert-parallel token routing and placement.",
+            "- Node-to-node exchange: GSPMD collective-permute / sequence- or tensor-sharded activation exchange.",
+            "- Node-to-DRAM fetch: remote HBM / remote KV / remote optimizer-state fetch.",
+            "- Shared-DRAM multicast: broadcast cache fill / replicated hot-state refill.",
+            "- XLA/GSPMD collective: baseline sharding and collectives.",
+            "- Remote-HBM streaming: pooled-HBM streaming schedule.",
+            "- Photonic multicast cache: optical broadcast prefetch to many local caches.",
+            "- MoE dispatch / locality routing: expert-parallel token routing and placement.",
             "",
             "## Optimal Distributed Mapping Choices",
             "",
@@ -3515,8 +3553,8 @@ def write_presentation_assets(
             changed = getattr(row, "optimal_mapping_changed_vs_baseline", False)
             changed_text = "changed" if changed else "same as baseline"
             lines.append(
-                f"- `{row.workload}` / `{row.architecture}` chooses "
-                f"`{row.optimal_distributed_mapping}` ({changed_text})."
+                f"- {humanize_label(row.workload)} / {humanize_label(row.architecture)} chooses "
+                f"{humanize_label(row.optimal_distributed_mapping)} ({changed_text})."
             )
     paths["presentation_index"].write_text("\n".join(lines) + "\n")
 

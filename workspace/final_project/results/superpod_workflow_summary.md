@@ -7,8 +7,8 @@ Models: gemini3_1_pro_moe_proxy, gemini3_deepthink_long_context_proxy
 ## Modeling Notes
 
 - The topology model is not a pure bandwidth scalar: hop count, contention, router latency, and multicast support all affect transfer cost.
-- Stage latency uses an exposed-stall model, `T_stage = max(T_compute, T_HBM) + (1 - overlap) * T_network`, so faster optical links can reduce both raw transport time and visible stalls.
-- In TPU/XLA terms, `node_to_node` corresponds to collective activation exchange, `node_to_dram` corresponds to remote HBM or KV fetch, and `shared_dram_multicast` corresponds to broadcast cache fill of shared state.
+- Stage latency uses an exposed-stall model, so faster optical links can reduce both raw transport time and visible stalls.
+- In TPU/XLA terms, node-to-node exchange corresponds to collective activation exchange, node-to-DRAM fetch corresponds to remote HBM or KV fetch, and shared-DRAM multicast corresponds to broadcast cache fill of shared state.
 - The model is analytic rather than packet-level and does not simulate queueing or OCS reconfiguration timing.
 
 ## Best Configurations

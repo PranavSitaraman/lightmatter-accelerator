@@ -1,11 +1,11 @@
 # Lightmatter Final Project — Summary
 
-Generated from the AccelForge + photonic-interconnect study pipeline.
+Summary of the AccelForge + photonic-interconnect architecture study.
 
 ## Executive Takeaways
 
 - The raw network model and the AccelForge fixed-point mapper both show the same direction: optical links help most when traffic leaves a single local HBM bank.
-- Re-running the mapper is explicitly measured: the pipeline reports both fixed-point tile/residency sensitivity and the higher-level distributed mapping choice that becomes optimal under each interconnect.
+- Re-running the mapper is explicitly measured: the study reports both fixed-point tile/residency sensitivity and the higher-level distributed mapping choice that becomes optimal under each interconnect.
 - A separate compiler/dataflow strategy model shows the more important effect: photonic multicast can make software-managed cache fills and shared-state broadcast preferable to classic SPMD activation exchange.
 - Scaling-law sweeps show that flat switched photonic fabrics keep hop count and contention nearly constant while torus and chiplet fabrics accumulate hop/contention cost as cubes grow toward superpod scale.
 - The full-superpod study models Gemini 3/3.1-class public proxy workloads on a 9216-chip Ironwood pod and reports end-to-end inference/training speedups by stage and by optimization ablation.
@@ -33,84 +33,84 @@ Generated from the AccelForge + photonic-interconnect study pipeline.
 
 ## TPU-Speak Translation
 
-| Project term | TPU/XLA analogy | Meaning in this project |
+| Study term | TPU/XLA analogy | Meaning in this project |
 |---|---|---|
-| `node_to_node` | GSPMD collective-permute / sequence- or tensor-sharded activation exchange | Activations/outputs stay sharded and are exchanged directly among chips. |
-| `node_to_dram` | Remote HBM / remote KV / remote optimizer-state fetch | A chip reads model state from a remote memory tier instead of relying only on local residency. |
-| `shared_dram_multicast` | Broadcast cache fill / replicated hot-state refill | One logical weight/KV/expert payload fans out to many chips; optics can charge only the unique payload. |
-| `xla_spmd_collective` | Baseline XLA/GSPMD sharding plan | Classic sharded tensors plus collectives over the mesh/torus. |
-| `remote_hbm_streaming` | Pooled-HBM streaming schedule | Compiler prefers remote reads over local replication when the network is cheap enough. |
-| `photonic_multicast_cache` | Optical broadcast prefetch | Compiler fills many local caches with one multicast transfer before compute. |
-| `moe_dispatch` / `moe_locality_routing` | Expert-parallel token routing | Expert dispatch/combine traffic and expert placement choices for MoE models. |
-| `gradient_sync` | Reduce-scatter / all-reduce | Training collective over active parameters. |
+| Node-to-node exchange | GSPMD collective-permute / sequence- or tensor-sharded activation exchange | Activations/outputs stay sharded and are exchanged directly among chips. |
+| Node-to-DRAM fetch | Remote HBM / remote KV / remote optimizer-state fetch | A chip reads model state from a remote memory tier instead of relying only on local residency. |
+| Shared-DRAM multicast | Broadcast cache fill / replicated hot-state refill | One logical weight/KV/expert payload fans out to many chips; optics can charge only the unique payload. |
+| XLA/GSPMD collective | Baseline XLA/GSPMD sharding plan | Classic sharded tensors plus collectives over the mesh/torus. |
+| Remote-HBM streaming | Pooled-HBM streaming schedule | Compiler prefers remote reads over local replication when the network is cheap enough. |
+| Photonic multicast cache | Optical broadcast prefetch | Compiler fills many local caches with one multicast transfer before compute. |
+| MoE dispatch / locality routing | Expert-parallel token routing | Expert dispatch/combine traffic and expert placement choices for MoE models. |
+| Gradient synchronization | Reduce-scatter / all-reduce | Training collective over active parameters. |
 
 ## Cluster Study Highlights (16-node system)
 
-### node_to_dram
+### node-to-DRAM fetch
 
-- Best energy reduction: `decode_mlp` → `67.91%`
-- Best latency reduction: `decode_mlp` → `91.84%`
+- Best energy reduction: decode MLP → 67.91%
+- Best latency reduction: decode MLP → 91.84%
 
-### node_to_node
+### node-to-node exchange
 
-- Best energy reduction: `prefill_projection` → `9.40%`
-- Best latency reduction: `decode_mlp` → `0.00%`
+- Best energy reduction: prefill projection → 9.40%
+- Best latency reduction: decode MLP → 0.00%
 
-### shared_dram_multicast
+### shared-DRAM multicast
 
-- Best energy reduction: `decode_mlp` → `72.21%`
-- Best latency reduction: `kv_attention` → `97.57%`
+- Best energy reduction: decode MLP → 72.21%
+- Best latency reduction: KV attention → 97.57%
 
 ## TPU Cube Highlights (64-node 4×4×4 cube)
 
 ### Photonic switched fabric (L200)
 
-- Best energy reduction: `shared_weight_multicast` → `99.82%`
-- Best latency reduction: `shared_weight_multicast` → `99.98%`
+- Best energy reduction: shared-weight multicast → 99.82%
+- Best latency reduction: shared-weight multicast → 99.98%
 
 ### Photonic switched fabric (L200X)
 
-- Best energy reduction: `shared_weight_multicast` → `99.81%`
-- Best latency reduction: `shared_weight_multicast` → `99.99%`
+- Best energy reduction: shared-weight multicast → 99.81%
+- Best latency reduction: shared-weight multicast → 99.99%
 
 ### Photonic switched fabric (M1000)
 
-- Best energy reduction: `shared_weight_multicast` → `99.91%`
-- Best latency reduction: `shared_weight_multicast` → `99.99%`
+- Best energy reduction: shared-weight multicast → 99.91%
+- Best latency reduction: shared-weight multicast → 99.99%
 
 ### Photonic torus (EVK100)
 
-- Best energy reduction: `shared_weight_multicast` → `99.70%`
-- Best latency reduction: `shared_weight_multicast` → `99.61%`
+- Best energy reduction: shared-weight multicast → 99.70%
+- Best latency reduction: shared-weight multicast → 99.61%
 
 ## TPU Cube Mapping Adaptation (AccelForge fixed point)
 
-- Best mapping-aware TPU-cube energy reduction: `TPU cube M1000 switched fabric` on `kv_attention / shared_dram_multicast` → `77.70%`.
-- Mapping signatures differed from the electrical baseline in `0` of `24` photonic mapping cases.
-- Example final mapping signature: `node.NodeX=0.25; node.NodeY=0.25; node.NodeZ=0.25; pe.reuse_input=1; pe.reuse_output=1; logical.Weights::read=8192.0 Kib; logical_usage.Weights=1.606e-07; hbm_usage.Activations=1.255e-09; hbm_usage.Outputs=8.031e-08; action::HBM::Activations::read=1.0 Kib; action::HBM::Outputs::write=64.0 Kib; action::MAC::None::compute=1024.0 Kib; action::Register::Weights::read=8192.0 Kib; action::Register::Weights::write=8192.0 Kib; action::UnifiedBuffer::Activations::read=128.0 Kib; action::UnifiedBuffer::Activations::write=1.0 Kib; action::UnifiedBuffer::Outputs::read=128.0 Kib; action::UnifiedBuffer::Outputs::write=128.0 Kib`
+- Best mapping-aware TPU-cube energy reduction: TPU cube M1000 switched fabric on KV attention / shared-DRAM multicast → 77.70%.
+- Mapping signatures differed from the electrical baseline in 0 of 24 photonic mapping cases.
+- Representative mapping interpretation: the local GEMM tile stays stable, but remote/shared state becomes cheaper at the logical-memory level; the larger placement decision is where the photonic advantage appears.
 
 ## Optimal Distributed Mapping Choices
 
-Here `scenario` is treated as the distributed inference mapping choice: node-to-node activation exchange, node-to-DRAM remote fetch, or shared-DRAM multicast.
+Each row treats the traffic scenario as a distributed inference mapping choice: node-to-node activation exchange, node-to-DRAM remote fetch, or shared-DRAM multicast.
 
 | Workload | Architecture | Optimal mapping | Changed vs baseline |
 |---|---|---|---|
-| decode_mlp | Electrical 4x4 Mesh / Electrical 800G/dir | node_to_node | False |
-| decode_mlp | Lightmatter Optical Crossbar / Lightmatter EVK100 | node_to_node | False |
-| kv_attention | Electrical 4x4 Mesh / Electrical 800G/dir | node_to_node | False |
-| kv_attention | Lightmatter Optical Crossbar / Lightmatter EVK100 | node_to_node | False |
-| prefill_projection | Electrical 4x4 Mesh / Electrical 800G/dir | node_to_node | False |
-| prefill_projection | Lightmatter Optical Crossbar / Lightmatter EVK100 | shared_dram_multicast | True |
-| kv_attention | TPU cube EVK100 photonic torus | node_to_node | False |
-| kv_attention | TPU cube L200 switched fabric | node_to_node | False |
-| kv_attention | TPU cube L200X switched fabric | node_to_node | False |
-| kv_attention | TPU cube M1000 switched fabric | node_to_node | False |
-| kv_attention | TPU cube electrical torus | node_to_node | False |
-| prefill_projection | TPU cube EVK100 photonic torus | shared_dram_multicast | True |
-| prefill_projection | TPU cube L200 switched fabric | shared_dram_multicast | True |
-| prefill_projection | TPU cube L200X switched fabric | shared_dram_multicast | True |
-| prefill_projection | TPU cube M1000 switched fabric | shared_dram_multicast | True |
-| prefill_projection | TPU cube electrical torus | node_to_node | False |
+| decode MLP | Electrical 4x4 Mesh / Electrical 800G/dir | node-to-node exchange | False |
+| decode MLP | Lightmatter Optical Crossbar / Lightmatter EVK100 | node-to-node exchange | False |
+| KV attention | Electrical 4x4 Mesh / Electrical 800G/dir | node-to-node exchange | False |
+| KV attention | Lightmatter Optical Crossbar / Lightmatter EVK100 | node-to-node exchange | False |
+| prefill projection | Electrical 4x4 Mesh / Electrical 800G/dir | node-to-node exchange | False |
+| prefill projection | Lightmatter Optical Crossbar / Lightmatter EVK100 | shared-DRAM multicast | True |
+| KV attention | TPU cube EVK100 photonic torus | node-to-node exchange | False |
+| KV attention | TPU cube L200 switched fabric | node-to-node exchange | False |
+| KV attention | TPU cube L200X switched fabric | node-to-node exchange | False |
+| KV attention | TPU cube M1000 switched fabric | node-to-node exchange | False |
+| KV attention | TPU cube electrical torus | node-to-node exchange | False |
+| prefill projection | TPU cube EVK100 photonic torus | shared-DRAM multicast | True |
+| prefill projection | TPU cube L200 switched fabric | shared-DRAM multicast | True |
+| prefill projection | TPU cube L200X switched fabric | shared-DRAM multicast | True |
+| prefill projection | TPU cube M1000 switched fabric | shared-DRAM multicast | True |
+| prefill projection | TPU cube electrical torus | node-to-node exchange | False |
 
 ## Compiler/Dataflow Strategy Choices
 
@@ -118,18 +118,18 @@ This layer models XLA/Pallas-visible choices above the inner AccelForge tile map
 
 | Workload | Architecture | Optimal strategy | Changed vs TPU electrical | Energy gain vs baseline |
 |---|---|---|---|---|
-| decode_mlp | Advanced chiplet torus | XLA SPMD collective | False | 0.05% |
-| decode_mlp | EVK100 photonic torus | XLA SPMD collective | False | 0.11% |
-| decode_mlp | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 67.21% |
-| decode_mlp | TPU electrical torus | XLA SPMD collective | False | 0.00% |
-| kv_attention | Advanced chiplet torus | XLA SPMD collective | False | 1.32% |
-| kv_attention | EVK100 photonic torus | XLA SPMD collective | False | 2.67% |
-| kv_attention | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 67.75% |
-| kv_attention | TPU electrical torus | XLA SPMD collective | False | 0.00% |
-| prefill_projection | Advanced chiplet torus | Remote pooled-HBM streaming | True | 20.45% |
-| prefill_projection | EVK100 photonic torus | Photonic multicast cache | True | 45.43% |
-| prefill_projection | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 53.31% |
-| prefill_projection | TPU electrical torus | XLA SPMD collective | False | 0.00% |
+| decode MLP | Advanced chiplet torus | XLA SPMD collective | False | 0.05% |
+| decode MLP | EVK100 photonic torus | XLA SPMD collective | False | 0.11% |
+| decode MLP | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 67.21% |
+| decode MLP | TPU electrical torus | XLA SPMD collective | False | 0.00% |
+| KV attention | Advanced chiplet torus | XLA SPMD collective | False | 1.32% |
+| KV attention | EVK100 photonic torus | XLA SPMD collective | False | 2.67% |
+| KV attention | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 67.75% |
+| KV attention | TPU electrical torus | XLA SPMD collective | False | 0.00% |
+| prefill projection | Advanced chiplet torus | Remote pooled-HBM streaming | True | 20.45% |
+| prefill projection | EVK100 photonic torus | Photonic multicast cache | True | 45.43% |
+| prefill projection | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 53.31% |
+| prefill projection | TPU electrical torus | XLA SPMD collective | False | 0.00% |
 
 ## Scaling-Law Exponents
 
@@ -137,22 +137,22 @@ Lower exponents mean better scaling as the system grows from one 64-chip cube to
 
 | Architecture | Scenario | Metric | Exponent |
 |---|---|---|---|
-| Advanced chiplet torus | all_to_all_activation | energy_uJ_per_chip | 0.336 |
-| Advanced chiplet torus | all_to_all_activation | latency_us_per_chip | 0.333 |
-| Advanced chiplet torus | shared_state_multicast | energy_uJ_per_chip | 1.295 |
-| Advanced chiplet torus | shared_state_multicast | latency_us_per_chip | 1.333 |
-| EVK100 photonic torus | all_to_all_activation | energy_uJ_per_chip | 0.336 |
-| EVK100 photonic torus | all_to_all_activation | latency_us_per_chip | 0.333 |
-| EVK100 photonic torus | shared_state_multicast | energy_uJ_per_chip | 0.295 |
-| EVK100 photonic torus | shared_state_multicast | latency_us_per_chip | 0.333 |
-| M1000 optical switched fabric | all_to_all_activation | energy_uJ_per_chip | 0.000 |
-| M1000 optical switched fabric | all_to_all_activation | latency_us_per_chip | 0.000 |
-| M1000 optical switched fabric | shared_state_multicast | energy_uJ_per_chip | 0.000 |
-| M1000 optical switched fabric | shared_state_multicast | latency_us_per_chip | 0.000 |
-| TPU electrical torus | all_to_all_activation | energy_uJ_per_chip | 0.336 |
-| TPU electrical torus | all_to_all_activation | latency_us_per_chip | 0.333 |
-| TPU electrical torus | shared_state_multicast | energy_uJ_per_chip | 1.295 |
-| TPU electrical torus | shared_state_multicast | latency_us_per_chip | 1.333 |
+| Advanced chiplet torus | all_to_all_activation | energy per chip | 0.336 |
+| Advanced chiplet torus | all_to_all_activation | latency per chip | 0.333 |
+| Advanced chiplet torus | shared-state multicast | energy per chip | 1.295 |
+| Advanced chiplet torus | shared-state multicast | latency per chip | 1.333 |
+| EVK100 photonic torus | all_to_all_activation | energy per chip | 0.336 |
+| EVK100 photonic torus | all_to_all_activation | latency per chip | 0.333 |
+| EVK100 photonic torus | shared-state multicast | energy per chip | 0.295 |
+| EVK100 photonic torus | shared-state multicast | latency per chip | 0.333 |
+| M1000 optical switched fabric | all_to_all_activation | energy per chip | 0.000 |
+| M1000 optical switched fabric | all_to_all_activation | latency per chip | 0.000 |
+| M1000 optical switched fabric | shared-state multicast | energy per chip | 0.000 |
+| M1000 optical switched fabric | shared-state multicast | latency per chip | 0.000 |
+| TPU electrical torus | all_to_all_activation | energy per chip | 0.336 |
+| TPU electrical torus | all_to_all_activation | latency per chip | 0.333 |
+| TPU electrical torus | shared-state multicast | energy per chip | 1.295 |
+| TPU electrical torus | shared-state multicast | latency per chip | 1.333 |
 
 ## Advanced Chiplet Baseline
 
@@ -162,10 +162,10 @@ The chiplet baseline uses the requested 3.5 Tbps one-way, 6 pJ/bit per-hop model
 |---|---|---|---|
 | all_to_all_activation | EVK100 photonic torus | 68.33% | -9.37% |
 | all_to_all_activation | M1000 optical switched fabric | 87.42% | 98.47% |
-| remote_weight_refill | EVK100 photonic torus | 68.33% | -9.37% |
-| remote_weight_refill | M1000 optical switched fabric | 90.42% | 98.47% |
-| shared_state_multicast | EVK100 photonic torus | 99.51% | 98.29% |
-| shared_state_multicast | M1000 optical switched fabric | 99.85% | 99.98% |
+| remote weight refill | EVK100 photonic torus | 68.33% | -9.37% |
+| remote weight refill | M1000 optical switched fabric | 90.42% | 98.47% |
+| shared-state multicast | EVK100 photonic torus | 99.51% | 98.29% |
+| shared-state multicast | M1000 optical switched fabric | 99.85% | 99.98% |
 
 ## Full-Superpod Gemini-Class End-to-End Study
 
@@ -229,21 +229,21 @@ Rows show how much each step contributes relative to the electrical Ironwood bas
   https://lightmatter.co/press-release/lightmatter-achieves-record-1-6-tbps-per-fiber-to-accelerate-ai-optical-interconnect/
 - **lightmatter_tco** (2025-08): >60 % TCO savings and 3–7x training speedup for 4.7T-param MoE (256 experts, 8 active) over 576 XPUs using L-Series vs electrical. Roadmap: pluggables 17–20 pJ/bit → 3D CPO as low as 3 pJ/bit.
   https://lightmatter.co/wp-content/uploads/2025/08/ISES-Korea-08-2025_Ritesh-Jain.pdf
-- **gemini_3** (2025-11-18): Google introduced Gemini 3 as its latest and most intelligent Gemini model family, with Gemini 3 Pro in preview across Gemini, AI Studio, Vertex AI, Search, and Antigravity. Public posts do not disclose parameter counts.
+- **Gemini 3** (2025-11-18): Google introduced Gemini 3 as its latest and most intelligent Gemini model family, with Gemini 3 Pro in preview across Gemini, AI Studio, Vertex AI, Search, and Antigravity. Public posts do not disclose parameter counts.
   https://blog.google/products-and-platforms/products/gemini/gemini-3/
-- **gemini_3_1_release_notes** (viewed 2026-04-17): Gemini app release notes state that Gemini 3.1 Pro is rolling out globally with higher limits for Google AI Pro and Ultra plans. The notes identify advanced reasoning but do not publish architecture or parameter sizes.
+- **Gemini 3.1 release notes** (viewed 2026-04-17): Gemini app release notes state that Gemini 3.1 Pro is rolling out globally with higher limits for Google AI Pro and Ultra plans. The notes identify advanced reasoning but do not publish architecture or parameter sizes.
   https://gemini.google/gb/release-notes/?hl=en-GB
-- **gemini_3_flash** (2025-12-17): Gemini 3 Flash is described as a speed-optimized Gemini 3 model. Google reported more than 1T API tokens/day after Gemini 3 launch, 30% fewer thinking tokens than 2.5 Pro on typical traffic, and 3x faster behavior than 2.5 Pro based on external benchmarking cited in the post.
+- **Gemini 3 Flash** (2025-12-17): Gemini 3 Flash is described as a speed-optimized Gemini 3 model. Google reported more than 1T API tokens/day after Gemini 3 launch, 30% fewer thinking tokens than 2.5 Pro on typical traffic, and 3x faster behavior than 2.5 Pro based on external benchmarking cited in the post.
   https://blog.google/products-and-platforms/products/gemini/gemini-3-flash/
-- **gemini_3_deep_think** (2026-02-12): Google released an updated Gemini 3 Deep Think mode for scientific, research, and engineering tasks; it emphasizes longer, more expensive reasoning. Public posts do not disclose model size.
+- **Gemini 3 Deep Think** (2026-02-12): Google released an updated Gemini 3 Deep Think mode for scientific, research, and engineering tasks; it emphasizes longer, more expensive reasoning. Public posts do not disclose model size.
   https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-deep-think/
 - **xla_spmd** (viewed 2026-04-17): PyTorch/XLA SPMD exposes mesh and partition specs; XLA transforms a single-device program into a partitioned program with collectives using sharding annotations. This motivates modeling compiler-visible dataflow choices, not just link swaps.
   https://docs.pytorch.org/xla/master/spmd.html
-- **tpu7x** (last updated 2026-04-15): TPU7x/Ironwood is Google's latest Cloud TPU. A pod has 9216 chips, 2307 BF16 TFLOP/s/chip, 4614 FP8 TFLOP/s/chip, 192 GiB HBM/chip, 7380 GiB/s HBM bandwidth/chip, and 1200 GB/s bidirectional ICI/chip. Google states it is designed for dense and MoE models, pre-training, sampling, and decode-heavy inference.
+- **TPU7x / Ironwood** (last updated 2026-04-15): TPU7x/Ironwood is Google's latest Cloud TPU. A pod has 9216 chips, 2307 BF16 TFLOP/s/chip, 4614 FP8 TFLOP/s/chip, 192 GiB HBM/chip, 7380 GiB/s HBM bandwidth/chip, and 1200 GB/s bidirectional ICI/chip. Google states it is designed for dense and MoE models, pre-training, sampling, and decode-heavy inference.
   https://docs.cloud.google.com/tpu/docs/tpu7x
-- **tpu_v5p** (viewed 2026-04-17): TPU v5p: 8960 chips per pod; 459 TFLOPS/chip, 95 GiB HBM, 2575 GiB/s HBM BW, 1200 GB/s bidirectional ICI per chip, 3D torus; 4x4x4 and larger slices have full torus connectivity.
+- **TPU v5p** (viewed 2026-04-17): TPU v5p: 8960 chips per pod; 459 TFLOPS/chip, 95 GiB HBM, 2575 GiB/s HBM BW, 1200 GB/s bidirectional ICI per chip, 3D torus; 4x4x4 and larger slices have full torus connectivity.
   https://cloud.google.com/tpu/docs/v5p
-- **ironwood_blog** (viewed 2026-04-17): Google describes Ironwood as XLA/software co-designed. A 64-chip cube uses dense 3D torus ICI; cubes scale to 9216 chips through an OCS fabric with dynamic optical reconfiguration and 88473.6 Tbps aggregate superpod connectivity.
+- **Ironwood blog_blog** (viewed 2026-04-17): Google describes Ironwood as XLA/software co-designed. A 64-chip cube uses dense 3D torus ICI; cubes scale to 9216 chips through an OCS fabric with dynamic optical reconfiguration and 88473.6 Tbps aggregate superpod connectivity.
   https://cloud.google.com/blog/products/compute/inside-the-ironwood-tpu-codesigned-ai-stack/
 - **tpu_rack_hotchips** (2025-08-24): Ironwood (2025): 4614 TFLOPS/chip, 192 GB HBM, 7.4 TBps HBM BW. 4x4x4 torus building block; 6 cube faces × 16 ICI links each. 96 optical + 80 copper + 64 PCB ICI connections per rack. Rack power-cap SLO < 15 ms; burst TDP window = 100 ms.
   https://hc2025.hotchips.org/assets/program/tutorials/HC2025.T1DCRacks.S7.Pankaj.pdf

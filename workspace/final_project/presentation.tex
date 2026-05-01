@@ -27,6 +27,7 @@
 
 \graphicspath{{results/presentation/}{results/}{./}}
 \DeclareGraphicsExtensions{.pdf,.png,.jpg}
+\pdfstringdefDisableCommands{\def\translate#1{#1}}
 
 \definecolor{DeepNavy}{HTML}{0B1F3A}
 \definecolor{Ink}{HTML}{1F2937}
@@ -67,9 +68,15 @@
 
 \newcommand{\sectionlabel}[1]{{\scriptsize\bfseries\color{Photon} #1}}
 \newcommand{\smallsource}[1]{{\tiny\color{Muted} Source: #1}}
+\newcommand{\defensenote}[1]{
+  \vspace{0.25em}
+  \begin{beamercolorbox}[rounded=true,wd=\linewidth,sep=0.38em]{block body}
+    {\tiny\textbf{Defense note.} #1}
+  \end{beamercolorbox}
+}
 
 \title[Lightmatter Photonic Interconnects]{Photonic Interconnects for TPU-Scale LLM Accelerators}
-\subtitle{AccelForge modeling of Lightmatter-style topologies, compiler-visible dataflows, and 9216-chip Gemini-class training/inference}
+\subtitle{A network-aware accelerator study of topology, dataflow, and 9216-chip Gemini-class training/inference}
 \author[Pranav Sitaraman]{Pranav Sitaraman}
 \institute[6.5930]{6.5930 Hardware Architecture for Deep Learning}
 \date[Final Project]{Final Project Presentation}
@@ -105,8 +112,7 @@
     Photonic interconnects are not just cheaper wires. High bandwidth, flatter topology, and native multicast can change the memory placement and compiler dataflow that should be chosen for distributed inference. Training still improves, but becomes compute dominated once collective traffic is reduced.
   \end{block}
 
-  \vspace{0.4em}
-  {\scriptsize All headline numbers come from the checked-in pipeline: \code{make validate}, \code{make study}, \code{make inference}, \code{make training}, and \code{make superpod}.}
+  \defensenote{The claim is deliberately narrower than ``optics make everything faster.'' I am separating three effects that are easy to blur together: a better link, a different topology, and new compiler choices that only become rational once remote communication is cheap.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -145,6 +151,42 @@
 \end{frame}
 
 % ---------------------------------------------------------------------------
+\begin{frame}[shrink=4]{How to Read This Deck as a Complete Report}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \sectionlabel{What is self-contained here}
+      \begin{tightitemize}
+        \item Motivation and the exact research question.
+        \item Public technology constants and where they come from.
+        \item AccelForge architecture, workload, and logical-memory loop.
+        \item Network equations, stall model, and TPU/XLA terminology.
+        \item All experiment families: cluster, TPU cube, mapping, compiler, scaling, chiplet, and SuperPod.
+        \item Headline results, negative results, limitations, and validation.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \sectionlabel{How to answer questions from the deck}
+      \begin{tabularx}{\linewidth}{lY}
+        \toprule
+        Question & Where to look \\
+        \midrule
+        Assumptions & technology, SuperPod, and limitations slides \\
+        Equations & network feedback and stall-model slides \\
+        Mapping changes & Milestone 2 and compiler/dataflow slides \\
+        Scaling & scaling-law and chiplet-baseline slides \\
+        End-to-end gains & SuperPod speedup, stage, ablation, and context slides \\
+        Replication & backup reproduction and artifact-map slides \\
+        \bottomrule
+      \end{tabularx}
+    \end{column}
+  \end{columns}
+  \vspace{0.45em}
+  \begin{block}{Presentation design goal}
+    The slides are not only a talk track. They are also a compact report: the appendix carries enough method, assumptions, commands, and artifact mapping to reproduce the project without reading the notebook first.
+  \end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
 \begin{frame}{What Was Modeled and Where It Came From}
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.50\textwidth}
@@ -176,42 +218,70 @@
         \item Advanced chiplet baseline: prompt-specified 3.5 \tbps{} one-way, 6 \pjbit{} per hop.
       \end{tightitemize}
       \vspace{0.4em}
-      \smallsource{\code{results/sources.csv}; \code{results/summary.md}}
+      \smallsource{Public product pages, Hot Chips/OCP material, Google TPU documentation, and XLA/GSPMD documentation.}
     \end{column}
   \end{columns}
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}[shrink=4]{Codebase and Reproduction Surface}
+\begin{frame}[shrink=4]{Research Method: From Question to Measurement}
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.55\textwidth}
-      \sectionlabel{Main implementation}
+      \sectionlabel{Measurement path}
       \begin{tabularx}{\linewidth}{lY}
         \toprule
-        File & Role \\
+        Step & What is measured \\
         \midrule
-        \code{scripts/lightmatter\_interconnects.py} & Topologies, technology catalog, AccelForge loop, compiler model, scaling, chiplet, SuperPod studies, CLI. \\
-        \code{scripts/generate\_lightmatter\_notebook.py} & Rebuilds the executed exploratory notebook. \\
-        \code{arch/tpu\_lightmatter\_cluster.yaml} & Logical cluster memory, node array, HBM, UB, register, MAC. \\
-        \code{workload/single\_matmul.yaml} & Parameterized GEMM template for M/K/N/bits. \\
-        \code{tests/test\_lightmatter\_project.py} & 70 unit/integration tests. \\
+        1. Public constants & Link bandwidth, energy per bit, router latency, HBM capacity/BW, chip count, and compute throughput. \\
+        2. AccelForge mapping & Local tile shape, logical-memory read/write counts, and per-level energy/latency. \\
+        3. Network overlay & Hop count, contention, multicast fanout, transfer energy, and transfer latency. \\
+        4. Feedback loop & Network cost is folded into the logical memory level and mapping is rerun to fixed point. \\
+        5. System model & Stage-level compute, HBM, network, overlap, and end-to-end speedup/energy. \\
         \bottomrule
       \end{tabularx}
     \end{column}
     \begin{column}{0.41\textwidth}
-      \sectionlabel{Exact commands}
-      \begin{block}{Dockerized workflow}
-        \code{make validate}\\
-        \code{make study}\\
-        \code{make inference}\\
-        \code{make training}\\
-        \code{make superpod}\\
-        \code{make notebook}
-      \end{block}
+      \sectionlabel{Controls}
+      \begin{tightitemize}
+        \item Keep accelerator compute, HBM, unified buffer, registers, and MAC array fixed unless explicitly stated.
+        \item Change only interconnect technology, topology, multicast support, and compiler-visible dataflow.
+        \item Compare against both electrical ICI and a stronger advanced-packaging chiplet point.
+        \item Report negative or modest effects, especially when local compute/HBM dominates.
+      \end{tightitemize}
       \vspace{0.4em}
-      {\scriptsize All targets run inside \code{timeloopaccelergy/accelforge:latest-amd64}. The notebook has 80 executed cells and the current test suite has 70 passing tests.}
+      {\scriptsize The important discipline is consistency: the same public constants, mapper inputs, topology equations, and stage equations are used throughout the study.}
     \end{column}
   \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[shrink=4]{Experiment Matrix}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \sectionlabel{What varies}
+      \begin{tightitemize}
+        \item System size: 16-node teaching cluster, 64-chip TPU cube, and 9216-chip SuperPod.
+        \item Topology: electrical mesh, electrical torus, photonic torus, switched optical fabric, and advanced chiplet torus.
+        \item Traffic pattern: direct exchange, remote-memory fetch, shared-state multicast, expert dispatch, and gradient collective.
+        \item Software strategy: SPMD collectives, remote-HBM streaming, local cache replication, optical multicast cache fill, and MoE locality routing.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \sectionlabel{What is reported}
+      \begin{tightitemize}
+        \item Network-only energy and latency: isolates the interconnect mechanism.
+        \item Mapping-aware AccelForge results: includes fixed-point feedback into logical memory.
+        \item Distributed mapping choice: asks whether photonics changes the best communication paradigm.
+        \item Scaling exponents: measures how per-chip cost changes from cube scale to pod scale.
+        \item End-to-end phase results: reports inference and training separately by stage and ablation.
+      \end{tightitemize}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.55em}
+  \begin{block}{Reason for the matrix}
+    The goal is to separate link improvement from topology improvement, and both of those from compiler/dataflow improvement.
+  \end{block}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -220,10 +290,10 @@
     \begin{column}{0.49\textwidth}
       \sectionlabel{Architecture model}
       \begin{tightitemize}
-        \item \code{LogicalClusterMemory}: union of all accelerator memories.
-        \item \code{NodeArray}: 2-D or 3-D accelerator grid, including TPU cube \code{NodeZ}.
-        \item \code{HBM}: local accelerator memory.
-        \item \code{UnifiedBuffer}, \code{Register}, \code{MAC}: local compute hierarchy.
+        \item Logical cluster memory: union of all accelerator memories.
+        \item Node array: 2-D or 3-D accelerator grid, including the third cube dimension.
+        \item HBM: local accelerator memory.
+        \item Unified buffer, register file, and MAC array: local compute hierarchy.
         \item Communication scenario controls which tensors live in logical memory versus local HBM.
       \end{tightitemize}
     \end{column}
@@ -236,9 +306,9 @@
         \]
       \end{block}
       \begin{tightitemize}
-        \item \code{decode\_mlp}: weight movement dominates.
-        \item \code{kv\_attention}: smaller attention traffic, latency-sensitive.
-        \item \code{prefill\_projection}: large activation and output movement.
+        \item Decode MLP: weight movement dominates.
+        \item KV attention: smaller attention traffic, latency-sensitive.
+        \item Prefill projection: large activation and output movement.
       \end{tightitemize}
     \end{column}
   \end{columns}
@@ -255,9 +325,9 @@
     \begin{column}{0.50\textwidth}
       \sectionlabel{Traffic cases}
       \begin{tightitemize}
-        \item \code{node\_to\_node}: activation/output exchange.
-        \item \code{node\_to\_dram}: remote weight/state fetch.
-        \item \code{shared\_dram\_multicast}: one logical source fans out to many nodes.
+        \item Node-to-node: activation/output exchange.
+        \item Node-to-DRAM: remote weight/state fetch.
+        \item Shared-DRAM multicast: one logical source fans out to many nodes.
       \end{tightitemize}
 
       \vspace{0.55em}
@@ -309,15 +379,16 @@
     \begin{column}{0.46\textwidth}
       \sectionlabel{Translation to TPU/XLA terms}
       \begin{tightitemize}
-        \item \code{node\_to\_node}: GSPMD tensor/sequence-sharded activation exchange.
-        \item \code{node\_to\_dram}: remote HBM, KV-cache fetch, or optimizer-state fetch.
-        \item \code{shared\_dram\_multicast}: broadcast cache fill of shared weights or hot state.
-        \item \code{remote\_hbm\_streaming}: pooled-HBM schedule instead of forced local residency.
-        \item \code{photonic\_multicast\_cache}: multicast prefetch/replicated refill enabled by optics.
-        \item \code{moe\_locality\_routing}: expert placement to reduce all-to-all pressure.
+        \item Node-to-node exchange: GSPMD tensor/sequence-sharded activation exchange.
+        \item Node-to-DRAM fetch: remote HBM, KV-cache fetch, or optimizer-state fetch.
+        \item Shared-DRAM multicast: broadcast cache fill of shared weights or hot state.
+        \item Remote-HBM streaming: pooled-HBM schedule instead of forced local residency.
+        \item Photonic multicast cache: multicast prefetch/replicated refill enabled by optics.
+        \item MoE locality routing: expert placement to reduce all-to-all pressure.
       \end{tightitemize}
     \end{column}
   \end{columns}
+  \defensenote{This is where the study connects back to TPU language: node-to-node traffic corresponds to sharded activation exchange, node-to-DRAM traffic corresponds to remote HBM or KV traffic, and shared-DRAM multicast corresponds to a broadcast cache fill.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -376,7 +447,7 @@
       \begin{tightitemize}
         \item In the TPU cube fixed-point mapper, photonic cases did \alert{not} change compact tile/residency signatures in 24 tested cases.
         \item This is not a failure: the GEMM micro-mapping is dominated by local UB/register/MAC reuse for the tested tensor shapes.
-        \item The pipeline explicitly reports this instead of hiding it.
+        \item The analysis explicitly reports this instead of hiding it.
       \end{tightitemize}
     \end{column}
     \begin{column}{0.48\textwidth}
@@ -536,7 +607,7 @@
         \item inference requests and training-token steps.
       \end{tightitemize}
       \vspace{0.35em}
-      {\scriptsize The deck reports modeled proxy behavior, not confidential Google internals.}
+      {\scriptsize The study reports modeled proxy behavior, not confidential Google internals.}
     \end{column}
   \end{columns}
 
@@ -571,6 +642,7 @@
       \end{block}
     \end{column}
   \end{columns}
+  \defensenote{The result is intentionally asymmetric. Inference is often waiting on the memory and network path, especially during decode and long-context attention. Training still benefits, but once collectives shrink, the remaining wall time is dominated by compute and local HBM movement.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -664,35 +736,33 @@
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{Generated Deliverables}
+\begin{frame}[shrink=4]{Evidence Map: What Each Result Answers}
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.49\textwidth}
-      \sectionlabel{Primary outputs}
+      \sectionlabel{Core empirical questions}
       \begin{tightitemize}
-        \item \code{lightmatter\_interconnects.ipynb}: executed exploratory notebook.
-        \item \code{results/cluster\_*.csv}: 16-node AccelForge cluster.
-        \item \code{results/tpu\_*.csv}: 64-chip TPU cube ICI replacement.
-        \item \code{results/optimal\_mapping\_choices.csv}: distributed mapping selector.
-        \item \code{results/compiler\_strategy\_study.csv}: XLA/Pallas-style strategy sweep.
-        \item \code{results/scaling\_*.csv}: 64-to-9216-chip scaling laws.
+        \item 16-node study: when does an optical crossbar beat an electrical mesh?
+        \item TPU cube study: what happens if ICI is replaced inside a 4x4x4 cube?
+        \item Mapping study: does the mapper or distributed placement actually change?
+        \item Compiler study: when should software prefer multicast cache fill or pooled remote HBM?
+        \item Scaling study: which topologies keep per-chip cost flat as the pod grows?
       \end{tightitemize}
     \end{column}
     \begin{column}{0.47\textwidth}
-      \sectionlabel{Presentation/report outputs}
+      \sectionlabel{System-level questions}
       \begin{tightitemize}
-        \item \code{results/chiplet\_comparison.csv}: 3.5 \tbps{} / 6 \pjbit{} baseline.
-        \item \code{results/superpod\_stage\_study.csv}: stage-level model.
-        \item \code{results/superpod\_end\_to\_end\_summary.csv}: total speedups.
-        \item \code{results/superpod\_ablation\_study.csv}: technique ladder.
-        \item \code{results/inference\_*}, \code{training\_*}: phase-specific workflows.
-        \item \code{results/presentation/*.png}: nine condensed figures used in this deck.
+        \item Chiplet comparison: is electrical packaging a strong enough alternative baseline?
+        \item Stage breakdown: which part of inference/training remains after network cost shrinks?
+        \item Ablation ladder: how much does each technique add beyond the previous one?
+        \item Context sweep: do photonic gains persist at long context?
+        \item Validation: constants, topology math, multicast behavior, mapping feedback, and phase separation are checked independently.
       \end{tightitemize}
     \end{column}
   \end{columns}
 
   \vspace{0.5em}
   \begin{center}
-    {\scriptsize The deliverables are generated, not hand-entered: re-run with \code{make validate}.}
+    {\scriptsize The same assumptions and equations underlie every table and figure, so the evidence reads as one continuous argument rather than separate anecdotes.}
   \end{center}
 \end{frame}
 
@@ -702,10 +772,10 @@
     \begin{column}{0.49\textwidth}
       \sectionlabel{Validity checks}
       \begin{tightitemize}
-        \item 70 tests cover constants, topology hop counts, multicast behavior, fixed-point solver, CSV writers, notebook structure, compiler strategies, scaling, chiplet, and SuperPod workflows.
-        \item \code{make validate} runs tests and regenerates the full artifact set.
+        \item 70 checks cover constants, topology hop counts, multicast behavior, fixed-point convergence, compiler strategies, scaling, chiplet, and SuperPod studies.
+        \item The same experiment path reproduces the complete result set from the public assumptions.
         \item Phase-specific outputs are checked: inference-only, training-only, combined SuperPod.
-        \item The paper source compiles after synchronization with the 70-test suite.
+        \item The final paper and deck are compiled after the numerical checks pass.
       \end{tightitemize}
     \end{column}
     \begin{column}{0.47\textwidth}
@@ -721,7 +791,7 @@
 
   \vspace{0.55em}
   \begin{block}{Why the conclusions are still useful}
-    The model is deliberately transparent: every assumption is in the source table or code, every result is regenerated from the repo, and the qualitative conclusion is tied to traffic shape, hop count, multicast, and compiler choices rather than a hidden black-box simulator.
+    The model is deliberately transparent: every assumption is documented, every result follows from the same equations, and the qualitative conclusion is tied to traffic shape, hop count, multicast, and compiler choices rather than a hidden black-box simulator.
   \end{block}
 \end{frame}
 
@@ -747,45 +817,197 @@
 
 % ---------------------------------------------------------------------------
 \appendix
-\begin{frame}{Backup: Figure Index}
+\begin{frame}[shrink=5]{Defense Notes: Motivation and Framing}
+  \sectionlabel{What motivated the study}
+  The starting concern was that an interconnect replacement can easily become a shallow comparison: take the same accelerator, multiply the network energy by a better pJ/bit number, and declare victory. That would not be a satisfying architecture project. The more interesting question is whether a better interconnect changes the design space itself.
+
+  \vspace{0.55em}
+  The study therefore treats Lightmatter-style photonics as a memory-system intervention. The hardware promise is not only higher bandwidth; it is lower energy per bit, flatter switching, and native multicast. Those properties matter most when the workload repeatedly leaves local HBM, fans shared state out to many chips, or performs expert dispatch across a large pod.
+
+  \vspace{0.55em}
+  The thesis I would defend is: photonics is strongest when it lets the system stop pretending that every distributed transfer should look like a conventional torus collective. It can make multicast cache fill, pooled remote HBM, and locality-aware expert placement look like reasonable compiler choices.
+\end{frame}
+
+\begin{frame}[shrink=5]{Defense Notes: Modeling Logic}
+  \sectionlabel{How the model should be read}
+  The network model has four knobs that must be kept separate: link bandwidth, per-bit energy, average hop count, and contention. A bandwidth-only model would miss the difference between a photonic torus and a switched optical fabric. The former keeps the torus path structure; the latter changes the path length and the fanout economics.
+
+  \vspace{0.55em}
+  The fixed-point loop exists because the network is meant to be part of the memory hierarchy, not a post-processing tax. AccelForge first maps the workload with a logical cluster memory. The network model then prices the logical-memory traffic. That cost is written back into the logical level, and the mapping is repeated until the cost and mapping signature stop moving.
+
+  \vspace{0.55em}
+  At SuperPod scale, the stage model adds a separate stall question. The raw transfer time is not always fully exposed, so each stage uses
+  \[
+      T_{\text{stage}} = \max(T_{\text{compute}}, T_{\text{HBM}})
+      + (1-\alpha)T_{\text{network}}.
+  \]
+  Higher overlap under photonic configurations is not magic; it represents the compiler having more room to stream, prefetch, multicast, and place state before it becomes a critical-path stall.
+\end{frame}
+
+\begin{frame}[shrink=5]{Defense Notes: Reading the Results}
+  \sectionlabel{From small systems to the pod}
+  The 16-node study is the sanity check. It shows that photonics is not uniformly beneficial; the gains are largest for remote and shared-memory cases, and much smaller for local node-to-node exchange. That pattern is exactly what the memory-system argument predicts.
+
+  \vspace{0.55em}
+  The TPU cube study asks whether the conclusion survives a more realistic topology. It does, but with nuance: a photonic torus helps less than a switched optical fabric because it inherits the torus hop structure. The M1000-style switched case is where the topology change becomes as important as the link improvement.
+
+  \vspace{0.55em}
+  The mapping results are deliberately conservative. The local GEMM tile signatures do not move in 24 TPU-cube fixed-point cases, because local SRAM/register/MAC reuse dominates those inner loops. The important movement appears above that layer: for prefill-style traffic, shared multicast becomes the best distributed placement in 5 of 16 cases, and the compiler study chooses remote pooled HBM or multicast cache fill where the electrical baseline would prefer conventional collectives.
+\end{frame}
+
+\begin{frame}[shrink=5]{Defense Notes: SuperPod Interpretation}
+  \sectionlabel{Why inference and training separate}
+  The full 9216-chip model is the stress test. Inference has repeated decode steps, KV/cache movement, expert routing, and long-context pressure. These are precisely the places where a flat, multicast-capable network removes exposed stall. That is why the Deep Think proxy reaches 14.50x modeled inference speedup under the full M1000 stack.
+
+  \vspace{0.55em}
+  Training behaves differently. Once gradient and expert traffic are reduced, the remaining work is mostly compute and local HBM movement. The best training speedup is still meaningful at 1.43x, but the energy improvement is small because network energy is no longer the dominant term.
+
+  \vspace{0.55em}
+  This distinction is important for credibility. The study does not claim that photonics solves every bottleneck. It says that photonics is a major lever for network-exposed inference and shared-state movement, while training eventually runs into the more familiar compute/HBM wall.
+\end{frame}
+
+\begin{frame}[shrink=5]{Defense Notes: Anticipated Questions}
+  \sectionlabel{Is this just bandwidth?}
+  No. The equations include hop count, contention, router latency, and multicast fanout. EVK100 on a torus and M1000 as a switched fabric can have similar traffic but very different path costs.
+
+  \vspace{0.45em}
+  \sectionlabel{Are in-flight stalls counted?}
+  Yes, at an analytical level. Network latency is fed back into the AccelForge logical memory level, and the SuperPod stage model exposes only the non-overlapped fraction of network time. The study does not claim packet-level queueing or optical-switch timing accuracy.
+
+  \vspace{0.45em}
+  \sectionlabel{How does this map to TPU/XLA terms?}
+  Node-to-node means sharded activation exchange or collective-permute-like traffic. Node-to-DRAM means remote HBM, KV, or optimizer-state fetch. Shared-DRAM multicast means broadcast cache fill of weights, expert state, or hot blocks. The compiler strategies correspond to GSPMD collectives, pooled-HBM streaming, multicast prefetch, and locality-aware MoE routing.
+\end{frame}
+
+\begin{frame}{Backup: Figure Reading Guide}
   \begin{tabularx}{\linewidth}{lY}
     \toprule
-    Figure & Meaning \\
+    Result family & What the audience should look for \\
     \midrule
-    \code{01\_cluster\_reductions.png} & 16-node EVK100 optical crossbar gains. \\
-    \code{02\_tpu\_mapping\_reductions.png} & TPU cube fixed-point mapping-aware gains. \\
-    \code{03\_topology\_diagram.png} & Topology comparison. \\
-    \code{04\_compiler\_strategy\_choices.png} & XLA/Pallas-style strategy changes. \\
-    \code{05\_scaling\_laws.png} & 64-to-9216-chip scaling-law slopes. \\
-    \code{06\_chiplet\_baseline.png} & Advanced chiplet comparison. \\
-    \code{07\_superpod\_end\_to\_end\_speedups.png} & Full-SuperPod speedups. \\
-    \code{08\_superpod\_stage\_breakdown.png} & SuperPod latency/energy breakdown. \\
-    \code{09\_superpod\_context\_scaling.png} & Long-context inference scaling. \\
+    Cluster reductions & Whether remote and multicast traffic benefit more than local exchange. \\
+    TPU cube mapping & Whether photonic ICI remains beneficial after AccelForge remaps with network-aware memory costs. \\
+    Topology diagram & Which gains come from link technology and which require a flatter fabric. \\
+    Compiler strategy & Whether the optimal dataflow changes from SPMD collectives to pooled HBM or multicast cache fill. \\
+    Scaling laws & Whether per-chip cost grows with system size or remains nearly flat. \\
+    Chiplet baseline & Whether photonics still helps against a stronger advanced-packaging comparison point. \\
+    SuperPod speedups & How much end-to-end inference/training changes at 9216 chips. \\
+    Stage breakdown & Which bottleneck remains after network latency is removed. \\
+    Context scaling & Whether long-context inference keeps a photonic advantage. \\
     \bottomrule
   \end{tabularx}
 \end{frame}
 
-\begin{frame}{Backup: Reproduction Checklist}
+\begin{frame}{Backup: Reproducibility Protocol}
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.48\textwidth}
-      \sectionlabel{Environment}
+      \sectionlabel{Environment assumptions}
       \begin{tightitemize}
-        \item Repo root: \code{final-project/}
-        \item Docker image: \code{timeloopaccelergy/accelforge:latest-amd64}
-        \item Main working directory inside container: \code{/home/workspace/workspace/final\_project}
+        \item Use the standard AccelForge environment from class.
+        \item Pin the same public hardware constants and proxy-workload definitions.
+        \item Derive figures and tables from the analytical studies rather than editing them by hand.
+        \item Compile the paper and slide deck after the numerical checks pass.
       \end{tightitemize}
     \end{column}
     \begin{column}{0.48\textwidth}
-      \sectionlabel{Commands}
+      \sectionlabel{Execution sequence}
       \begin{tightitemize}
-        \item \code{make test}: 70-test validation suite.
-        \item \code{make study}: all CSV, Markdown, and plot artifacts.
-        \item \code{make inference/training/superpod}: phase workflows.
-        \item \code{make notebook}: regenerate and execute notebook.
-        \item \code{make validate}: production path used for this deck.
+        \item Validate constants, topology equations, multicast behavior, and fixed-point convergence.
+        \item Reproduce cluster, TPU cube, compiler, scaling, chiplet, and SuperPod studies.
+        \item Review the exploratory analysis to confirm the narrative path.
+        \item Reproduce the phase-specific inference/training summaries.
+        \item Inspect the final PDFs for page counts, missing references, and layout warnings.
       \end{tightitemize}
     \end{column}
   \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Backup: Exact Reproduction Commands}
+  \sectionlabel{Run from the repository root}
+  \begin{lstlisting}[basicstyle=\ttfamily\tiny,columns=fullflexible]
+make test       # 70 validation checks
+make study      # regenerate CSV, Markdown, and plot artifacts
+make inference  # regenerate inference-only SuperPod outputs
+make training   # regenerate training-only SuperPod outputs
+make superpod   # regenerate combined SuperPod outputs
+make notebook   # regenerate and execute the notebook
+make validate   # tests + full artifact regeneration
+  \end{lstlisting}
+
+  \vspace{0.35em}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \sectionlabel{Source of truth}
+      \begin{tightitemize}
+        \item \code{scripts/lightmatter\_interconnects.py}: model and CLI.
+        \item \code{arch/tpu\_lightmatter\_cluster.yaml}: AccelForge hierarchy.
+        \item \code{workload/single\_matmul.yaml}: parameterized GEMM template.
+        \item \code{tests/test\_lightmatter\_project.py}: validation suite.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \sectionlabel{Generated deliverables}
+      \begin{tightitemize}
+        \item \code{results/*.csv}: numerical studies.
+        \item \code{results/*.png}: figures used in paper/deck.
+        \item \code{results/*\_summary.md}: readable summaries.
+        \item \code{lightmatter\_interconnects.ipynb}: executed walkthrough.
+      \end{tightitemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[shrink=6]{Backup: Artifact Map}
+  \begin{tabularx}{\linewidth}{lY}
+    \toprule
+    Project question & Reproducible files \\
+    \midrule
+    Technology constants and citations &
+    \code{sources.csv}, \code{summary.md}, \code{tech\_catalog.png} \\
+    16-node logical-memory loop &
+    \code{cluster\_study.csv}, \code{cluster\_improvements.csv}, \code{convergence\_traces.png}, \code{energy\_breakdown.png} \\
+    TPU cube ICI replacement &
+    \code{tpu\_cube\_case\_study.csv}, \code{tpu\_improvements.csv}, \code{tpu\_mapping\_study.csv}, \code{02\_tpu\_mapping\_reductions.png} \\
+    Distributed mapping and compiler strategy &
+    \code{optimal\_mapping\_choices.csv}, \code{compiler\_strategy\_study.csv}, \code{optimal\_compiler\_strategies.csv}, \code{04\_compiler\_strategy\_choices.png} \\
+    Scaling and stronger chiplet baseline &
+    \code{scaling\_law\_study.csv}, \code{scaling\_exponents.csv}, \code{chiplet\_comparison.csv}, \code{05\_scaling\_laws.png}, \code{06\_chiplet\_baseline.png} \\
+    9216-chip inference/training model &
+    \code{superpod\_stage\_study.csv}, \code{superpod\_end\_to\_end\_summary.csv}, \code{superpod\_ablation\_study.csv}, \code{superpod\_context\_scaling.csv}, \code{07--09\_superpod\_*.png} \\
+    Phase-specific replication &
+    \code{inference\_*\_study.csv}, \code{training\_*\_study.csv}, \code{inference\_workflow\_summary.md}, \code{training\_workflow\_summary.md} \\
+    \bottomrule
+  \end{tabularx}
+
+  \vspace{0.45em}
+  {\scriptsize Every plot in this deck is generated from these artifacts. No plotted result is hand-edited after generation.}
+\end{frame}
+
+\begin{frame}[shrink=5]{Backup: Assumption Boundaries}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \sectionlabel{What is directly measured by AccelForge}
+      \begin{tightitemize}
+        \item Local memory hierarchy behavior.
+        \item Logical-memory access counts.
+        \item Fixed-point logical-memory cost feedback.
+        \item Mapping signatures and convergence behavior.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \sectionlabel{What is analytical system modeling}
+      \begin{tightitemize}
+        \item Topology hop count, contention, and multicast fanout.
+        \item SuperPod stage compute/HBM/network decomposition.
+        \item Compiler/dataflow strategy preference.
+        \item Gemini-class dense, MoE, and long-context proxies.
+      \end{tightitemize}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.55em}
+  \begin{block}{Boundary}
+    The project does not claim private Gemini internals or vendor-accurate optical-switch timing. It claims an auditable architecture model that shows when photonic properties change mapping, dataflow, and scaling behavior.
+  \end{block}
 \end{frame}
 
 \end{document}
