@@ -10,6 +10,10 @@ AccelForge's iterative hardware mapper.
 
 | File | Description |
 |---|---|
+| `proposal/paper.tex` / `proposal/paper.pdf` | **Self-contained IEEE report** — background, related work, model, experiments, results, limitations, and required usage disclosure. |
+| `proposal/technical_summary.tex` / `proposal/technical_summary.pdf` | **One-page technical summary** — project facts, contributions, key insights, reproducibility, and threats to validity. |
+| `proposal/poster.tex` / `proposal/poster.pdf` | **Poster deliverable** — title, group members, motivation, underlying principles, evaluation, results/analysis, and references. |
+| `presentation.tex` / `presentation.pdf` | **Self-contained presentation** — slide deck plus discussion notes and replication map. |
 | `lightmatter_interconnects.ipynb` | **Main executed notebook** — all 3 milestones + TPU cube ICI study + mapping-choice analysis + compiler/dataflow strategies + scaling laws + chiplet baseline + full-superpod Gemini-class study. 80 cells, fully executed, 0 errors. |
 | `scripts/lightmatter_interconnects.py` | Core study engine: topology models, iterative solver, mapping signatures, TPU cube mapping study, compiler/dataflow study, scaling laws, full-superpod model, technology catalog, sweep functions, CLI. |
 | `scripts/generate_lightmatter_notebook.py` | Programmatic notebook generator. |
@@ -18,13 +22,26 @@ AccelForge's iterative hardware mapper.
 | `workload/single_matmul.yaml` | Parameterized GEMM workload template (M, K, N, bits). |
 | `results/presentation/` | Concise final-report package: executive summary, topology diagram, and nine condensed plots. |
 
+## Course Concept Map
+
+This project uses the 6.5930 mapping vocabulary explicitly:
+
+| Class concept | Project interpretation |
+|---|---|
+| Data movement dominates energy | The results separate compute, HBM, logical-memory, and network terms instead of reporting only total speedup. |
+| Memory hierarchy and locality | `LogicalClusterMemory` sits above per-chip HBM, UB, registers, and MACs; network cost is folded into this logical level. |
+| Mapping | AccelForge reports partitioning, stationarity/dataflow, tile sizing, and storage residency for each GEMM proxy. |
+| Dataflow vs. distributed schedule | Intra-chip dataflow can remain stable while compiler-visible distributed policies, such as multicast cache fill or remote HBM streaming, change. |
+| Calculating data motion | Mapper action counts become bits, then topology equations price hop count, contention, and multicast fanout. |
+| Emerging technologies | Lightmatter-style photonics is evaluated as a system-level change: lower pJ/bit, flatter topology, multicast, pooled memory, and new compiler choices. |
+
 ## Technology Catalog
 
 | Technology | BW (one-way) | Energy (pJ/bit) | Multicast | Source |
 |---|---|---|---|---|
 | Electrical 800G | 800 Gbps | 10.0 (assumed) | No | TPU v5p ICI inference |
 | **EVK50** | 800 Gbps | 4.6 | Yes | SC25 demo, Dec 2025 |
-| **EVK100** | 3.2 Tbps | **1.9** | Yes | Passage family / ISES Korea 2025 reference value; 3.2 pJ/bit tracked as conservative sensitivity context |
+| **EVK100** | 3.2 Tbps aggregate | **3.2 / 1.9** | Yes | Product target at 112G PAM4 / Passage-family sensitivity point |
 | **L200** | 16 Tbps | 4.5 | Yes | Product page (32 Tbps total) |
 | **L200X** | 32 Tbps | 4.8 | Yes | Product page (64 Tbps total) |
 | **M1000** | 57.3 Tbps | 2.3 | Yes + OCS | M1000 EVK product page (114.6 Tbps total bi-directional) |
@@ -87,7 +104,7 @@ training_*                  — training-only superpod workflow artifacts
 superpod_*                  — combined training/inference superpod workflow artifacts
 presentation/              — concise executive summary + 9 chart/diagram assets
 sources.csv                — research bibliography
-summary.md                 — auto-generated highlights report
+summary.md                 — highlights report
 *.png                      — all plots (tech_catalog, convergence, heatmap, ...)
 ```
 
@@ -104,6 +121,9 @@ make superpod
 
 # Regenerate and execute the notebook
 make notebook
+
+# Rebuild report/presentation/poster/summary PDFs
+make deliverables
 
 # Run all 70 tests
 make test

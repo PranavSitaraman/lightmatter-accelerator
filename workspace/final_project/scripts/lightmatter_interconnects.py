@@ -1596,37 +1596,6 @@ def all_technologies_network_comparison(
 # Sensitivity sweeps (Milestone 3 / extended analysis)
 # ---------------------------------------------------------------------------
 
-def sweep_node_counts(
-    workload_name: str,
-    scenario_name: str,
-    topology: Topology,
-    tech: InterconnectTech,
-    node_counts: Iterable[int] = (4, 8, 16, 32, 64),
-    max_iterations: int = 4,
-) -> pd.DataFrame:
-    """
-    Evaluate converged network energy/latency for varying numbers of active nodes.
-    Runs solve_iteratively for each node count; each call requires AccelForge.
-    """
-    rows = []
-    workload = workload_case(workload_name)
-    for n in node_counts:
-        scenario = scenario_case(scenario_name, active_nodes=n)
-        history, _ = solve_iteratively(
-            workload, scenario, topology, tech, max_iterations=max_iterations
-        )
-        final = history[-1]
-        rows.append({
-            "active_nodes": n,
-            "final_energy_uJ": final.total_energy_j * 1e6,
-            "final_latency_us": final.total_latency_s * 1e6,
-            "network_energy_uJ": final.network.total_energy_j * 1e6,
-            "network_latency_us": final.network.total_latency_s * 1e6,
-            "iterations_to_converge": len(history),
-        })
-    return pd.DataFrame(rows)
-
-
 def bandwidth_sensitivity_network(
     traffic_bits: float = 8 * 1024**3,
     scenario_name: str = "node_to_dram",

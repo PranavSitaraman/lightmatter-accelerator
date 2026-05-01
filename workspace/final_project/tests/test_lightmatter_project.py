@@ -695,6 +695,29 @@ class TestArtifactWriter(unittest.TestCase):
         ):
             self.assertIn(col, df.columns)
 
+    def test_inner_mapping_invariant_under_photonic_technology(self):
+        # Regression test for the central finding:
+        # "0 of 24 inner AccelForge mapping signatures change under any
+        # photonic technology" --- if this asserts false, the paper's
+        # headline distinction between layer-3 mapping and layer-4
+        # distributed schedule no longer holds.
+        df = tpu_cube_mapping_study(
+            workload_names=("kv_attention", "decode_mlp"),
+            scenario_names=("node_to_dram", "shared_dram_multicast"),
+            max_iterations=1,
+            node_shape=(2, 2, 2),
+            hbm_gib=8,
+        )
+        non_baseline = df[df["variant"] != "Electrical torus"]
+        self.assertGreater(len(non_baseline), 0)
+        differs = non_baseline["mapping_differs_from_electrical"]
+        self.assertFalse(
+            differs.any(),
+            f"Photonic technologies should not change the inner mapping; "
+            f"got {int(differs.sum())} of {len(non_baseline)} cases that "
+            f"reported a different signature.",
+        )
+
     def test_executive_summary_frame_contains_headline_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = write_study_outputs(

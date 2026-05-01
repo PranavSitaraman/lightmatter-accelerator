@@ -1,0 +1,113 @@
+\documentclass[10pt]{article}
+\usepackage[margin=0.6in,top=0.5in,bottom=0.5in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{0.4em}{0.15em}
+\titleformat{\section}{\normalfont\bfseries\normalsize}{}{0pt}{}
+\setlist{nosep,leftmargin=1.2em}
+\renewcommand{\arraystretch}{1.0}
+\hypersetup{colorlinks=true,urlcolor=blue!50!black,linkcolor=black,citecolor=black}
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{center}
+{\large\bfseries Technical Summary Sheet} \quad
+6.5930 / Hardware Architectures for Deep Learning, Spring 2026\\[1pt]
+\textbf{Topology-Aware Mapping for Photonic Interconnects in TPU-Class LLM Accelerators}\\
+Pranav Sitaraman (\texttt{sitaraman.pranav@gmail.com}) \quad and \quad
+Simone Surdi (\texttt{simonesurdi@gmail.com})
+\end{center}
+
+\section*{Repository}
+\texttt{final-project/workspace/final\_project/} (extends the
+AccelForge cluster example). Reproduce all numbers with
+\texttt{make study \&\& make notebook \&\& make test} from
+\texttt{final-project/}. The 71-test suite is the canonical
+correctness check; nine figures live under
+\texttt{results/presentation/}.
+
+\section*{Three Key Insights / Innovations}
+\begin{enumerate}
+\item \textbf{The intra-chip mapping is stable; the distributed
+schedule is what changes.} For the 64-chip TPU cube, AccelForge
+converges to the same partitioning/dataflow/tile signature for all
+seven technologies (\textbf{0/24} inner mappings change). The benefit
+lives one layer up: \textbf{5/16} workload--scenario pairs flip their
+optimal communication pattern, and the optimal compiler-visible
+schedule changes whenever multicast is available. Separating the two
+layers matches the 6.5930 mapping formalism rather than conflating it.
+
+\item \textbf{Hardware multicast, not raw bandwidth, dominates
+shared-state workloads.} A 3.5~Tb/s, 6~pJ/bit advanced chiplet
+baseline---chosen to defeat the bandwidth hypothesis---is still
+beaten by M1000 by \textbf{99.85\%} on shared-DRAM multicast: $N$
+unicasts collapse to one broadcast, and contention disappears on a
+switched fabric. The same chiplet is competitive on node-to-node
+exchange.
+
+\item \textbf{Photonics is not a uniform multiplier.} On a 9216-chip
+Ironwood-class superpod, long-context inference reaches
+\textbf{14.50}$\times$ speedup, but training only reaches
+\textbf{1.43}$\times$. Once collectives shrink, training becomes
+compute-dominated; inference stays network-exposed because decode and
+MoE routing cross the fabric every step. The strong case for
+photonics is inference and long-context serving, not training payoff.
+\end{enumerate}
+
+\section*{Headline Results (reproducible from \texttt{results/})}
+\begin{tabularx}{\linewidth}{@{}lrX@{}}
+\toprule
+Axis & Value & Setting \\
+\midrule
+16-node energy reduction        & 72.21\%       & EVK100 multicast \\
+16-node latency reduction       & 97.57\%       & EVK100 multicast \\
+TPU-cube network energy red.    & 99.91\%       & M1000 multicast \\
+TPU-cube AccelForge energy red. & 77.70\%       & M1000 KV attention \\
+Inner mapping signatures        & 0/24 changed  & TPU cube \\
+Distributed maps changed        & 5/16 cases    & cluster study \\
+Compiler-schedule best gain     & 67.75\%       & M1000 remote streaming \\
+Multicast scaling exponent      & 0.00          & M1000 vs torus / chiplet \\
+Chiplet-relative reduction      & 99.85\%       & M1000 multicast \\
+Superpod inference speedup      & 14.50$\times$ & Deep Think proxy \\
+Superpod training speedup       & 1.43$\times$  & Pro MoE proxy \\
+Superpod inference energy red.  & 51.07\%       & Deep Think proxy \\
+\bottomrule
+\end{tabularx}
+
+\section*{Contributions}
+\textbf{Simone Surdi} -- AccelForge/network model: topology classes
+(ring, mesh, 3-D torus, optical crossbar / switched fabric); the
+\texttt{LogicalClusterMemory} extension; the iterative network-aware
+feedback loop (\texttt{solve\_iteratively}); mapping-signature
+extraction; cluster, TPU-cube, and chiplet-baseline studies;
+technology-catalog constants and sensitivity sweeps.
+\quad
+\textbf{Pranav Sitaraman} -- Compiler/superpod analysis: schedule
+enumeration (SPMD collectives, remote HBM streaming, replicated HBM
+cache, multicast cache fill, MoE locality, full photonic stack);
+the 9216-chip Ironwood-class stage model (prefill / decode / refill /
+MoE / training / gradient / optimizer); Gemini-class proxy workloads;
+ablation ladder; integration tests; report, poster, and presentation
+deliverables.
+
+\section*{Reproducibility and Threats to Bias}
+Lightmatter constants are from public product pages and SC25/ISES
+talks; TPU constants are from Cloud TPU docs and the Ironwood
+blog / Hot Chips tutorial. EVK100 is reported both as the conservative
+3.2~pJ/bit product target and the 1.9~pJ/bit Passage-family
+sensitivity point; M1000 uses 114.6~Tb/s bidirectional and 2.3~pJ/bit
+including laser power. Optical multicast is modeled as one logical
+broadcast (optimistic but explicit). The superpod stage model is
+analytical with an overlap factor; cycle-accurate simulation is left
+to future work. Gemini parameter counts are unpublished, so we use
+public proxy stress workloads. The 71-test suite asserts technology
+constants, the multicast scaling exponent, and the
+schedule-changes-under-photonics property as regression tests.
+
+\end{document}

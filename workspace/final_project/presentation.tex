@@ -71,15 +71,15 @@
 \newcommand{\defensenote}[1]{
   \vspace{0.25em}
   \begin{beamercolorbox}[rounded=true,wd=\linewidth,sep=0.38em]{block body}
-    {\tiny\textbf{Defense note.} #1}
+    {\tiny\textbf{Discussion note.} #1}
   \end{beamercolorbox}
 }
 
-\title[Lightmatter Photonic Interconnects]{Photonic Interconnects for TPU-Scale LLM Accelerators}
-\subtitle{A network-aware accelerator study of topology, dataflow, and 9216-chip Gemini-class training/inference}
-\author[Pranav Sitaraman]{Pranav Sitaraman}
-\institute[6.5930]{6.5930 Hardware Architecture for Deep Learning}
-\date[Final Project]{Final Project Presentation}
+\title[Photonic Interconnects for TPU-Scale LLMs]{Topology-Aware Mapping for Photonic Interconnects in TPU-Class LLM Accelerators}
+\subtitle{Separating intra-chip mapping from distributed schedule: cluster, TPU cube, and 9216-chip Gemini-class superpod}
+\author[Sitaraman \& Surdi]{Pranav Sitaraman \and Simone Surdi}
+\institute[MIT 6.5930]{MIT 6.5930 / Hardware Architectures for Deep Learning}
+\date[Final Project]{Final Project Presentation, Spring 2026}
 
 \begin{document}
 
@@ -182,7 +182,7 @@
   \end{columns}
   \vspace{0.45em}
   \begin{block}{Presentation design goal}
-    The slides are not only a talk track. They are also a compact report: the appendix carries enough method, assumptions, commands, and artifact mapping to reproduce the project without reading the notebook first.
+    The slides are not only a visual backdrop. They are also a compact technical report: the appendix carries enough method, assumptions, commands, and artifact mapping to reproduce the project without reading the notebook first.
   \end{block}
 \end{frame}
 
@@ -198,7 +198,7 @@
         Electrical 800G & 0.8T & 10.0 & no \\
         Chiplet 3.5T & 3.5T & 6.0/hop & no \\
         EVK50 & 0.8T & 4.6 & yes \\
-        EVK100 & 3.2T & 1.9 & yes \\
+        EVK100 & 3.2T & 3.2 / 1.9 & yes \\
         L200 & 16.0T & 4.5 & yes \\
         L200X & 32.0T & 4.8 & yes \\
         M1000 & 57.3T & 2.3 & yes+OCS \\
@@ -206,7 +206,7 @@
       \end{tabularx}
       \vspace{0.3em}
 
-      {\tiny MC = native multicast. BW is one-way per modeled link/chip.}
+      {\tiny MC = native multicast. BW is one-way per modeled link/chip. EVK100 uses the conservative 3.2 \pjbit{} public target and a 1.9 \pjbit{} Passage-family sensitivity point.}
     \end{column}
     \begin{column}{0.46\textwidth}
       \sectionlabel{Source trail}
@@ -320,6 +320,35 @@
 \end{frame}
 
 % ---------------------------------------------------------------------------
+\begin{frame}[shrink=5]{Four Modeling Layers (and Why ``Mapping'' is Layer 3)}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \sectionlabel{Layers 1--3: inside AccelForge}
+      \begin{tightitemize}
+        \item \textbf{(1) Workload (einsum).} \code{single\_matmul.yaml}: $O_{m,n}=\sum_k A_{m,k}W_{k,n}$, rank sizes per LLM stage.
+        \item \textbf{(2) Architecture.} \code{!Memory}/\code{!Container}/\code{!Compute}: \code{LogicalClusterMemory}, \code{NodeArray} fanout, per-chip \code{HBM}, \code{UnifiedBuffer}, \code{ProcessingElement}, \code{Register}, \code{MAC}.
+        \item \textbf{(3) Mapping (AccelForge mapper output).} The 6.5930 formalism: partitioning + dataflow (stationarity) + tile sizing. \code{!Storage}/\code{!Temporal}/\code{!Spatial}/\code{!Compute} sequence with \code{tile\_shape}.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \sectionlabel{Layer 4: above AccelForge}
+      \begin{tightitemize}
+        \item \textbf{(4) Distributed schedule.} The mapper does not see this layer.
+        \item \code{COMM\_PATTERN}: which tensor lives in \code{LogicalClusterMemory} vs per-chip \code{HBM}.
+        \item Topology cost model (\(E=B\,h\,e_\ell\), contention, multicast).
+        \item Discrete enum of compiler-visible policies: \code{spmd\_collective}, \code{remote\_hbm\_streaming}, \code{replicated\_hbm\_cache}, \code{photonic\_multicast\_cache}.
+      \end{tightitemize}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.45em}
+  \begin{block}{Terminology, tied to class}
+    ``Mapping'' is the layer-3 AccelForge output (partitioning, dataflow stationarity, tile sizing). ``Dataflow'' alone refers to the intra-PE stationarity pattern (WS/OS/IS/RS). When we say ``distributed dataflow strategy'' we mean layer-4 inter-chip movement, not the intra-PE pattern. Both are reported separately.
+  \end{block}
+  \defensenote{The professor's natural objection is ``how can the mapping stay the same while compiler optimizations differ?'' The answer is that the inner mapping (layer 3) is dominated by per-chip compute and SRAM/HBM reuse, which photonics does not change; only layer 4 sees the new network costs. We report layer 3 and layer 4 separately rather than collapsing them into one ``mapping changed'' number.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
 \begin{frame}{Network Model and Fixed-Point Feedback}
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.50\textwidth}
@@ -392,6 +421,39 @@
 \end{frame}
 
 % ---------------------------------------------------------------------------
+\begin{frame}[shrink=5]{End-to-End Stage Accounting}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \sectionlabel{Modeled terms}
+      \begin{tabularx}{\linewidth}{lY}
+        \toprule
+        Stage & What changes under photonics \\
+        \midrule
+        Local GEMM & Usually little: MAC/UB/register reuse stays local. \\
+        Remote HBM / KV & Link energy, bandwidth, hops, and exposed stall shrink. \\
+        Shared cache fill & Non-multicast fabrics repeat unicast; optics charge closer to unique payload. \\
+        Collectives & Torus hop/contention cost can be reduced by stronger links or flatter topology. \\
+        MoE dispatch & Locality-aware routing reduces expert all-to-all pressure. \\
+        Training sync & Improves, but is often overlapped with compute. \\
+        \bottomrule
+      \end{tabularx}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \sectionlabel{Not modeled}
+      \begin{tightitemize}
+        \item Exact XLA lowering or runtime scheduling.
+        \item Packet queues, virtual channels, and retry protocols.
+        \item Optical switch retiming/reconfiguration microarchitecture.
+        \item Real Gemini parameter counts or expert layouts.
+        \item Thermal, packaging cost, reliability, and laser-sharing constraints.
+      \end{tightitemize}
+      \vspace{0.35em}
+      {\scriptsize This boundary is intentional: the project is an architecture-level data-movement and mapping study, not a vendor-accurate TPU simulator.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
 \begin{frame}{Topology Space}
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.59\textwidth}
@@ -437,6 +499,7 @@
       \end{block}
     \end{column}
   \end{columns}
+  \defensenote{The 16-node mesh is the smallest experiment. Two numbers should be read together: 72.21\% energy reduction on shared multicast (the biggest fanout case), versus only 9.40\% on node-to-node activation exchange (one electrical hop on a torus is already cheap). This asymmetry is the project hypothesis in miniature: photonics is not a uniform multiplier. The latency 0.00\% on node-to-node says we are not even in the regime where photonics buys time --- both the electrical mesh and the EVK100 crossbar can hide the single-hop latency behind compute.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -472,6 +535,36 @@
   \begin{block}{Key nuance}
     The inner AccelForge tile choice can remain stable while the \emph{distributed memory placement} changes. That is exactly the compiler-level effect the project was designed to expose.
   \end{block}
+  \defensenote{Why the inner mapping does not move under photonics: the per-chip GEMM is dominated by local compute, register reuse, \code{UnifiedBuffer} reuse, and per-chip HBM access. Photonics changes none of those costs. It only changes the cost of \code{LogicalClusterMemory} accesses, which is layer 4. So the same partitioning + dataflow + tile sizing wins in 24 of 24 cases. The honest negative result is that the AccelForge mapping signature is an insufficient probe for cluster-fabric changes; the layer-4 distributed-schedule analysis is what the photonic question really wants.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[shrink=5]{Why ``Same Mapping'' and ``Different Compiler Policy'' Can Both Be True}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \sectionlabel{What stayed the same}
+      \begin{tightitemize}
+        \item TPU-cube compact signatures keep the same local spatial usage in the tested cases.
+        \item Example pattern: \code{NodeX=0.25}, \code{NodeY=0.25}, and often \code{NodeZ=0.25/0.50}.
+        \item UB/register/MAC reuse remains dominated by GEMM shape and local reuse.
+        \item This is a class dataflow result: local temporal/spatial reuse still wins inside the accelerator.
+      \end{tightitemize}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \sectionlabel{What changed}
+      \begin{tightitemize}
+        \item Prefill distributed policy changes from node-to-node exchange to shared-state multicast in 5 of 16 cases.
+        \item M1000 compiler strategy changes to remote pooled-HBM streaming for decode MLP and KV attention.
+        \item EVK100 prefill prefers photonic multicast cache fill.
+        \item These are memory-placement and communication choices above the local loop mapping.
+      \end{tightitemize}
+    \end{column}
+  \end{columns}
+
+  \vspace{0.45em}
+  \begin{block}{Class-language takeaway}
+    The local mapping answers ``how do I reuse this GEMM tile across SRAM/registers/MACs?'' The compiler policy answers ``where should the tensor live and how should I move it across the pod?'' Photonics changes the second question more than the first.
+  \end{block}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -497,6 +590,7 @@
       {\scriptsize Best cases are shared-weight/state multicast. M1000 also gives 92.45\% energy and 99.65\% latency reduction for all-to-all shard exchange.}
     \end{column}
   \end{columns}
+  \defensenote{The 64-chip TPU cube is the closest to a real Ironwood subblock: 4$\times$4$\times$4 with 1200~GB/s ICI per chip. The figure shows energy and latency reductions per scenario: multicast and remote-DRAM scenarios benefit by 99.91\% and 77.70\% respectively; node-to-node benefits modestly. The near-100\% multicast number deserves scrutiny --- it is dominated by the unicast-vs-multicast volume collapse, not by the link-energy ratio. If we strip multicast support out of M1000 the gain falls to roughly the link-energy ratio, which is approximately a 4$\times$ improvement.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -555,6 +649,7 @@
       \end{block}
     \end{column}
   \end{columns}
+  \defensenote{The exponent is the slope of the per-chip energy or latency curve on a log-log plot of system size versus per-chip cost. A torus accumulates $h \propto \sqrt[3]{N}$ hops and $\sqrt[3]{N}$ contention, so per-chip cost grows polynomially. A switched optical fabric has constant hop count and no contention, so its slope is 0. The 1.295 multicast slope on torus is exactly $h_{\text{torus}} \cdot N$ unicast volume divided by $N$ chips $\to$ grows as $h$. The 0.000 slope on M1000 multicast is the structural reason photonics scales gracefully to 9216 chips: each chip pays the same modeled cost regardless of pod size.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -584,10 +679,11 @@
       {\scriptsize EVK100 torus is energy-efficient but can be slower than chiplet for unicast because it preserves torus hop structure.}
     \end{column}
   \end{columns}
+  \defensenote{This slide answers the natural skeptic's question: is photonics just better bandwidth? The advanced chiplet baseline at 3.5~\tbps{}, 6~\pjbit{} is a deliberately strong electrical/packaging point --- close to UCIe-class numbers --- chosen to defeat the bandwidth hypothesis. M1000 still beats it by 99.85\% on shared-state multicast because the chiplet still pays $N$ unicasts. The 87.42\% all-to-all gain is the bandwidth + topology effect; the additional gap to 99.85\% is the multicast effect alone. So multicast and topology each contribute roughly an order of magnitude.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{Full 9216-Chip Study: What Is Being Claimed}
+\begin{frame}[shrink=4]{Full 9216-Chip Study: What Is Being Claimed}
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.51\textwidth}
       \sectionlabel{Public hardware target}
@@ -615,6 +711,7 @@
   \begin{block}{Modeled configurations}
     Ironwood electrical torus, advanced chiplet torus, EVK100 photonic torus + multicast cache, M1000 switched topology only, and M1000 full photonic compiler stack.
   \end{block}
+  \defensenote{The pod-scale model is analytical, not cycle-accurate. Each stage decomposes into compute, HBM, and network terms; only the non-overlapped network time is exposed. Baseline overlap is $\alpha=0.35$; full M1000 uses $\alpha=0.78$ because multicast and remote streaming leave less network on the critical path.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -670,6 +767,7 @@
       {\scriptsize Once network latency is mostly gone, the remaining bottleneck is compute + HBM, so further interconnect improvements have diminishing returns.}
     \end{column}
   \end{columns}
+  \defensenote{Notice the network-latency share collapses 90.67\%~$\to$~0.07\%, but the speedup is 14.50$\times$, not 1000$\times$. The reason is the stage equation: $T = \max(T_c,T_{\text{HBM}}) + (1{-}\alpha)T_{\text{net}}$. Once the network term is negligible, the system becomes compute-and-HBM-bound, and the per-chip TFLOP/s and per-chip HBM bandwidth become the bottleneck. The numbers therefore quantify exactly when photonics stops paying off: the moment the network share drops below the compute term, further fabric improvements have diminishing returns.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -706,10 +804,11 @@
       \end{block}
     \end{column}
   \end{columns}
+  \defensenote{The ladder isolates each contribution. Going from electrical to advanced chiplet (3.5~\tbps{}, 6~\pjbit{}) gives 3.65$\times$, the link-energy + bandwidth effect. Adding photonic torus + multicast on top gives another 1.67$\times$ --- the multicast volume effect. Switching to a flat optical fabric gives another 1.97$\times$ --- the topology effect. The remaining $\sim$1.20$\times$ comes from compiler-visible policies (multicast cache, remote HBM, MoE locality, full stack). The breakdown matters because it tells a designer where to invest: if your packaging is already chiplet-class, photonic links alone buy $\sim$1.7$\times$; you only see the full benefit by switching the topology too.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{Long-Context Inference Scaling}
+\begin{frame}[shrink=4]{Long-Context Inference Scaling}
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.58\textwidth}
       \includegraphics[width=\linewidth]{09_superpod_context_scaling.png}
@@ -733,6 +832,7 @@
       \end{block}
     \end{column}
   \end{columns}
+  \defensenote{Long context grows KV-cache traffic and attention compute. At small context the model is network-exposed; at very long context compute/HBM grows faster than the network term, so the speedup naturally falls from 13.58$\times$ to 2.27$\times$.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -784,6 +884,7 @@
         \item Not RTL, packet-level, or thermal simulation.
         \item Gemini workloads are explicit proxies because model internals are not public.
         \item Photonic multicast and OCS behavior are modeled analytically from public product specs.
+        \item AccelForge does not instantiate a separate inter-chip NoC here; ICI/NoC-like cost is modeled as logical-memory network cost.
         \item Physical integration, scheduling overheads, cost, reliability, and laser sharing are outside the current model.
       \end{tightitemize}
     \end{column}
@@ -811,13 +912,14 @@
 
   \vspace{0.95em}
   \begin{block}{Bottom line}
-    Lightmatter-style photonic interconnects are most compelling when they change the memory/dataflow problem: large fanout, long context, expert routing, shared state, and remote cache movement. The project shows both the constant-factor link gains and the deeper mapping/compiler gains needed for a convincing accelerator-architecture story.
+    Lightmatter-style photonic interconnects are most compelling when they change the distributed-schedule problem: large fanout, long context, expert routing, shared state, and remote cache movement. The project shows both the constant-factor link gains \emph{and} the layer-4 distributed-schedule gains needed for a convincing accelerator-architecture story.
   \end{block}
+  \defensenote{One sentence to take away: the inner mapping is stable, the distributed schedule changes, and the schedule change is what makes inference speed up far more than training. Everything else in the deck is supporting evidence for that one sentence.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
 \appendix
-\begin{frame}[shrink=5]{Defense Notes: Motivation and Framing}
+\begin{frame}[shrink=5]{Appendix: Motivation and Framing}
   \sectionlabel{What motivated the study}
   The starting concern was that an interconnect replacement can easily become a shallow comparison: take the same accelerator, multiply the network energy by a better pJ/bit number, and declare victory. That would not be a satisfying architecture project. The more interesting question is whether a better interconnect changes the design space itself.
 
@@ -828,7 +930,7 @@
   The thesis I would defend is: photonics is strongest when it lets the system stop pretending that every distributed transfer should look like a conventional torus collective. It can make multicast cache fill, pooled remote HBM, and locality-aware expert placement look like reasonable compiler choices.
 \end{frame}
 
-\begin{frame}[shrink=5]{Defense Notes: Modeling Logic}
+\begin{frame}[shrink=5]{Appendix: Modeling Logic}
   \sectionlabel{How the model should be read}
   The network model has four knobs that must be kept separate: link bandwidth, per-bit energy, average hop count, and contention. A bandwidth-only model would miss the difference between a photonic torus and a switched optical fabric. The former keeps the torus path structure; the latter changes the path length and the fanout economics.
 
@@ -844,7 +946,7 @@
   Higher overlap under photonic configurations is not magic; it represents the compiler having more room to stream, prefetch, multicast, and place state before it becomes a critical-path stall.
 \end{frame}
 
-\begin{frame}[shrink=5]{Defense Notes: Reading the Results}
+\begin{frame}[shrink=5]{Appendix: Reading the Results}
   \sectionlabel{From small systems to the pod}
   The 16-node study is the sanity check. It shows that photonics is not uniformly beneficial; the gains are largest for remote and shared-memory cases, and much smaller for local node-to-node exchange. That pattern is exactly what the memory-system argument predicts.
 
@@ -855,7 +957,7 @@
   The mapping results are deliberately conservative. The local GEMM tile signatures do not move in 24 TPU-cube fixed-point cases, because local SRAM/register/MAC reuse dominates those inner loops. The important movement appears above that layer: for prefill-style traffic, shared multicast becomes the best distributed placement in 5 of 16 cases, and the compiler study chooses remote pooled HBM or multicast cache fill where the electrical baseline would prefer conventional collectives.
 \end{frame}
 
-\begin{frame}[shrink=5]{Defense Notes: SuperPod Interpretation}
+\begin{frame}[shrink=5]{Appendix: SuperPod Interpretation}
   \sectionlabel{Why inference and training separate}
   The full 9216-chip model is the stress test. Inference has repeated decode steps, KV/cache movement, expert routing, and long-context pressure. These are precisely the places where a flat, multicast-capable network removes exposed stall. That is why the Deep Think proxy reaches 14.50x modeled inference speedup under the full M1000 stack.
 
@@ -866,7 +968,7 @@
   This distinction is important for credibility. The study does not claim that photonics solves every bottleneck. It says that photonics is a major lever for network-exposed inference and shared-state movement, while training eventually runs into the more familiar compute/HBM wall.
 \end{frame}
 
-\begin{frame}[shrink=5]{Defense Notes: Anticipated Questions}
+\begin{frame}[shrink=5]{Appendix: Anticipated Questions}
   \sectionlabel{Is this just bandwidth?}
   No. The equations include hop count, contention, router latency, and multicast fanout. EVK100 on a torus and M1000 as a switched fabric can have similar traffic but very different path costs.
 
@@ -945,7 +1047,7 @@ make validate   # tests + full artifact regeneration
       \end{tightitemize}
     \end{column}
     \begin{column}{0.48\textwidth}
-      \sectionlabel{Generated deliverables}
+      \sectionlabel{Result files}
       \begin{tightitemize}
         \item \code{results/*.csv}: numerical studies.
         \item \code{results/*.png}: figures used in paper/deck.
@@ -979,7 +1081,7 @@ make validate   # tests + full artifact regeneration
   \end{tabularx}
 
   \vspace{0.45em}
-  {\scriptsize Every plot in this deck is generated from these artifacts. No plotted result is hand-edited after generation.}
+  {\scriptsize Every plot in this deck is drawn directly from these artifacts. No plotted result is adjusted by hand.}
 \end{frame}
 
 \begin{frame}[shrink=5]{Backup: Assumption Boundaries}
