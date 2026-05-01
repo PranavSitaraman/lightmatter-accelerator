@@ -8,7 +8,8 @@ Summary of the AccelForge + photonic-interconnect architecture study.
 - Re-running the mapper is explicitly measured: the study reports both fixed-point tile/residency sensitivity and the higher-level distributed mapping choice that becomes optimal under each interconnect.
 - A separate compiler/dataflow strategy model shows the more important effect: photonic multicast can make software-managed cache fills and shared-state broadcast preferable to classic SPMD activation exchange.
 - Scaling-law sweeps show that flat switched photonic fabrics keep hop count and contention nearly constant while torus and chiplet fabrics accumulate hop/contention cost as cubes grow toward superpod scale.
-- The full-superpod study models Gemini 3/3.1-class public proxy workloads on a 9216-chip Ironwood pod and reports end-to-end inference/training speedups by stage and by optimization ablation.
+- The full-superpod study models public Gemma 4 open-model proxies plus Gemini-class stress proxies on Ironwood/TPU7x and reports end-to-end inference/training speedups by stage and by optimization ablation.
+- The latest unified study replaces flat pJ/bit constants with conversion-plus-distance physics, and compares strong scaling, weak scaling, optical circuit switching, and optical packet switching in one end-to-end chain.
 - The TPU cube study separates two design points: a conservative EVK100 photonic torus and higher-bandwidth switched-fabric options (L200/L200X/M1000).
 - EVK100 public collateral includes both a 1.9 pJ/bit Passage-family value and a more conservative 3.2 pJ/bit EVK100 technical-spec value; this project uses 1.9 pJ/bit as the main optimistic/reference point and includes sensitivity hooks for alternatives.
 
@@ -48,18 +49,18 @@ Summary of the AccelForge + photonic-interconnect architecture study.
 
 ### node-to-DRAM fetch
 
-- Best energy reduction: decode MLP → 67.91%
-- Best latency reduction: decode MLP → 91.84%
+- Best energy reduction: decode MLP → 67.69%
+- Best latency reduction: decode MLP → 91.83%
 
 ### node-to-node exchange
 
-- Best energy reduction: prefill projection → 9.40%
+- Best energy reduction: prefill projection → 9.30%
 - Best latency reduction: decode MLP → 0.00%
 
 ### shared-DRAM multicast
 
-- Best energy reduction: decode MLP → 72.21%
-- Best latency reduction: KV attention → 97.57%
+- Best energy reduction: decode MLP → 71.95%
+- Best latency reduction: decode MLP → 97.57%
 
 ## TPU Cube Highlights (64-node 4×4×4 cube)
 
@@ -80,12 +81,12 @@ Summary of the AccelForge + photonic-interconnect architecture study.
 
 ### Photonic torus (EVK100)
 
-- Best energy reduction: shared-weight multicast → 99.70%
+- Best energy reduction: shared-weight multicast → 99.93%
 - Best latency reduction: shared-weight multicast → 99.61%
 
 ## TPU Cube Mapping Adaptation (AccelForge fixed point)
 
-- Best mapping-aware TPU-cube energy reduction: TPU cube M1000 switched fabric on KV attention / shared-DRAM multicast → 77.70%.
+- Best mapping-aware TPU-cube energy reduction: TPU cube EVK100 photonic torus on KV attention / shared-DRAM multicast → 77.45%.
 - Mapping signatures differed from the electrical baseline in 0 of 24 photonic mapping cases.
 - Representative mapping interpretation: the local GEMM tile stays stable, but remote/shared state becomes cheaper at the logical-memory level; the larger placement decision is where the photonic advantage appears.
 
@@ -119,16 +120,19 @@ This layer models XLA/Pallas-visible choices above the inner AccelForge tile map
 | Workload | Architecture | Optimal strategy | Changed vs TPU electrical | Energy gain vs baseline |
 |---|---|---|---|---|
 | decode MLP | Advanced chiplet torus | XLA SPMD collective | False | 0.05% |
-| decode MLP | EVK100 photonic torus | XLA SPMD collective | False | 0.11% |
-| decode MLP | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 67.21% |
+| decode MLP | EVK100 photonic torus | Remote pooled-HBM streaming | True | 73.57% |
+| decode MLP | M1000 optical packet fabric | Remote pooled-HBM streaming | True | 60.75% |
+| decode MLP | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 67.42% |
 | decode MLP | TPU electrical torus | XLA SPMD collective | False | 0.00% |
-| KV attention | Advanced chiplet torus | XLA SPMD collective | False | 1.32% |
-| KV attention | EVK100 photonic torus | XLA SPMD collective | False | 2.67% |
-| KV attention | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 67.75% |
+| KV attention | Advanced chiplet torus | XLA SPMD collective | False | 1.30% |
+| KV attention | EVK100 photonic torus | Remote pooled-HBM streaming | True | 73.86% |
+| KV attention | M1000 optical packet fabric | Remote pooled-HBM streaming | True | 61.54% |
+| KV attention | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 67.94% |
 | KV attention | TPU electrical torus | XLA SPMD collective | False | 0.00% |
-| prefill projection | Advanced chiplet torus | Remote pooled-HBM streaming | True | 20.45% |
-| prefill projection | EVK100 photonic torus | Photonic multicast cache | True | 45.43% |
-| prefill projection | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 53.31% |
+| prefill projection | Advanced chiplet torus | Remote pooled-HBM streaming | True | 20.41% |
+| prefill projection | EVK100 photonic torus | Remote pooled-HBM streaming | True | 53.70% |
+| prefill projection | M1000 optical packet fabric | Remote pooled-HBM streaming | True | 52.33% |
+| prefill projection | M1000 optical switched fabric | Remote pooled-HBM streaming | True | 53.04% |
 | prefill projection | TPU electrical torus | XLA SPMD collective | False | 0.00% |
 
 ## Scaling-Law Exponents
@@ -137,21 +141,21 @@ Lower exponents mean better scaling as the system grows from one 64-chip cube to
 
 | Architecture | Scenario | Metric | Exponent |
 |---|---|---|---|
-| Advanced chiplet torus | all_to_all_activation | energy per chip | 0.336 |
+| Advanced chiplet torus | all_to_all_activation | energy per chip | 0.669 |
 | Advanced chiplet torus | all_to_all_activation | latency per chip | 0.333 |
-| Advanced chiplet torus | shared-state multicast | energy per chip | 1.295 |
+| Advanced chiplet torus | shared-state multicast | energy per chip | 1.627 |
 | Advanced chiplet torus | shared-state multicast | latency per chip | 1.333 |
-| EVK100 photonic torus | all_to_all_activation | energy per chip | 0.336 |
+| EVK100 photonic torus | all_to_all_activation | energy per chip | 0.002 |
 | EVK100 photonic torus | all_to_all_activation | latency per chip | 0.333 |
-| EVK100 photonic torus | shared-state multicast | energy per chip | 0.295 |
+| EVK100 photonic torus | shared-state multicast | energy per chip | 0.002 |
 | EVK100 photonic torus | shared-state multicast | latency per chip | 0.333 |
-| M1000 optical switched fabric | all_to_all_activation | energy per chip | 0.000 |
+| M1000 optical switched fabric | all_to_all_activation | energy per chip | 0.005 |
 | M1000 optical switched fabric | all_to_all_activation | latency per chip | 0.000 |
-| M1000 optical switched fabric | shared-state multicast | energy per chip | 0.000 |
+| M1000 optical switched fabric | shared-state multicast | energy per chip | 0.005 |
 | M1000 optical switched fabric | shared-state multicast | latency per chip | 0.000 |
-| TPU electrical torus | all_to_all_activation | energy per chip | 0.336 |
+| TPU electrical torus | all_to_all_activation | energy per chip | 0.668 |
 | TPU electrical torus | all_to_all_activation | latency per chip | 0.333 |
-| TPU electrical torus | shared-state multicast | energy per chip | 1.295 |
+| TPU electrical torus | shared-state multicast | energy per chip | 1.627 |
 | TPU electrical torus | shared-state multicast | latency per chip | 1.333 |
 
 ## Advanced Chiplet Baseline
@@ -160,35 +164,51 @@ The chiplet baseline uses the requested 3.5 Tbps one-way, 6 pJ/bit per-hop model
 
 | Scenario | Architecture | Energy reduction vs chiplet | Latency reduction vs chiplet |
 |---|---|---|---|
-| all_to_all_activation | EVK100 photonic torus | 68.33% | -9.37% |
-| all_to_all_activation | M1000 optical switched fabric | 87.42% | 98.47% |
-| remote weight refill | EVK100 photonic torus | 68.33% | -9.37% |
-| remote weight refill | M1000 optical switched fabric | 90.42% | 98.47% |
-| shared-state multicast | EVK100 photonic torus | 99.51% | 98.29% |
+| all_to_all_activation | EVK100 photonic torus | 89.76% | -9.38% |
+| all_to_all_activation | M1000 optical switched fabric | 87.36% | 98.47% |
+| remote weight refill | EVK100 photonic torus | 92.19% | -9.38% |
+| remote weight refill | M1000 optical switched fabric | 90.36% | 98.47% |
+| shared-state multicast | EVK100 photonic torus | 99.88% | 98.29% |
 | shared-state multicast | M1000 optical switched fabric | 99.85% | 99.98% |
 
-## Full-Superpod Gemini-Class End-to-End Study
+## Full-Superpod Gemma/Gemini End-to-End Study
 
-Google has not published Gemini 3/3.1 parameter counts, so this section reports explicit dense/MoE proxies rather than claiming confidential model internals.
+Gemma 4 open-model proxies use public size/context facts; Gemini stress proxies remain explicit dense/MoE/long-context assumptions because Google has not published Gemini 3/3.1 parameter counts.
 
 | Model | Phase | Configuration | Speedup vs electrical | Energy reduction | Network latency share | Throughput tokens/s |
 |---|---|---|---|---|---|---|
-| Gemini 3 Deep Think long-context proxy | inference | M1000 full photonic compiler stack | 14.50x | 51.07% | 0.07% | 1.17e+07 |
-| Gemini 3 Deep Think long-context proxy | inference | M1000 switched optical topology only | 12.02x | 49.18% | 0.58% | 9.71e+06 |
-| Gemini 3 Deep Think long-context proxy | inference | Advanced chiplet torus + XLA SPMD | 3.65x | 19.92% | 67.50% | 2.95e+06 |
+| Gemini 3 Deep Think long-context proxy | inference | M1000 full photonic compiler stack | 14.50x | 83.80% | 0.08% | 1.17e+07 |
+| Gemini 3 Deep Think long-context proxy | inference | M1000 switched optical topology only | 12.02x | 83.17% | 0.58% | 9.71e+06 |
+| Gemini 3 Deep Think long-context proxy | inference | Advanced chiplet torus + XLA SPMD | 3.65x | 33.19% | 67.50% | 2.95e+06 |
 | Gemini 3 Deep Think long-context proxy | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 0.00% | 90.67% | 8.07e+05 |
-| Gemini 3 Deep Think long-context proxy | training | M1000 full photonic compiler stack | 1.43x | 0.67% | 0.00% | 3.89e+06 |
-| Gemini 3 Deep Think long-context proxy | training | M1000 switched optical topology only | 1.19x | 0.67% | 0.00% | 3.24e+06 |
-| Gemini 3 Deep Think long-context proxy | training | Advanced chiplet torus + XLA SPMD | 1.10x | 0.27% | 1.23% | 2.97e+06 |
+| Gemini 3 Deep Think long-context proxy | training | M1000 full photonic compiler stack | 1.43x | 3.38% | 0.00% | 3.89e+06 |
+| Gemini 3 Deep Think long-context proxy | training | M1000 switched optical topology only | 1.19x | 3.37% | 0.00% | 3.24e+06 |
+| Gemini 3 Deep Think long-context proxy | training | Advanced chiplet torus + XLA SPMD | 1.10x | 1.34% | 1.23% | 2.97e+06 |
 | Gemini 3 Deep Think long-context proxy | training | Ironwood electrical torus + XLA SPMD | 1.00x | 0.00% | 5.52% | 2.71e+06 |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | M1000 full photonic compiler stack | 11.02x | 45.27% | 0.05% | 2.42e+07 |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | M1000 switched optical topology only | 9.15x | 43.82% | 0.40% | 2.01e+07 |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | Advanced chiplet torus + XLA SPMD | 3.38x | 17.72% | 60.41% | 7.41e+06 |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | M1000 full photonic compiler stack | 11.01x | 78.48% | 0.06% | 2.42e+07 |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | M1000 switched optical topology only | 9.15x | 77.91% | 0.42% | 2.01e+07 |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | Advanced chiplet torus + XLA SPMD | 3.38x | 31.08% | 60.41% | 7.41e+06 |
 | Gemini 3.1 Pro-class sparse MoE proxy | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 0.00% | 87.71% | 2.2e+06 |
-| Gemini 3.1 Pro-class sparse MoE proxy | training | M1000 full photonic compiler stack | 1.42x | 0.54% | 0.00% | 4.86e+06 |
-| Gemini 3.1 Pro-class sparse MoE proxy | training | M1000 switched optical topology only | 1.18x | 0.53% | 0.00% | 4.05e+06 |
-| Gemini 3.1 Pro-class sparse MoE proxy | training | Advanced chiplet torus + XLA SPMD | 1.09x | 0.22% | 0.99% | 3.73e+06 |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | M1000 full photonic compiler stack | 1.42x | 2.72% | 0.00% | 4.86e+06 |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | M1000 switched optical topology only | 1.18x | 2.72% | 0.00% | 4.05e+06 |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | Advanced chiplet torus + XLA SPMD | 1.09x | 1.08% | 0.99% | 3.73e+06 |
 | Gemini 3.1 Pro-class sparse MoE proxy | training | Ironwood electrical torus + XLA SPMD | 1.00x | 0.00% | 4.47% | 3.43e+06 |
+| Gemma 4 26B MoE proxy | inference | M1000 full photonic compiler stack | 42.43x | 94.05% | 0.26% | 2.19e+08 |
+| Gemma 4 26B MoE proxy | inference | M1000 switched optical topology only | 34.07x | 93.35% | 1.80% | 1.76e+08 |
+| Gemma 4 26B MoE proxy | inference | Advanced chiplet torus + XLA SPMD | 4.38x | 37.25% | 86.43% | 2.26e+07 |
+| Gemma 4 26B MoE proxy | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 0.00% | 96.76% | 5.15e+06 |
+| Gemma 4 26B MoE proxy | training | M1000 full photonic compiler stack | 3.37x | 46.41% | 0.03% | 7.29e+08 |
+| Gemma 4 26B MoE proxy | training | M1000 switched optical topology only | 2.80x | 46.35% | 0.09% | 6.07e+08 |
+| Gemma 4 26B MoE proxy | training | Advanced chiplet torus + XLA SPMD | 1.98x | 18.50% | 24.12% | 4.28e+08 |
+| Gemma 4 26B MoE proxy | training | Ironwood electrical torus + XLA SPMD | 1.00x | 0.00% | 59.78% | 2.17e+08 |
+| Gemma 4 31B dense proxy | inference | M1000 full photonic compiler stack | 27.88x | 91.18% | 0.16% | 1.06e+08 |
+| Gemma 4 31B dense proxy | inference | M1000 switched optical topology only | 22.73x | 90.49% | 1.17% | 8.63e+07 |
+| Gemma 4 31B dense proxy | inference | Advanced chiplet torus + XLA SPMD | 4.15x | 36.11% | 80.58% | 1.58e+07 |
+| Gemma 4 31B dense proxy | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 0.00% | 95.10% | 3.79e+06 |
+| Gemma 4 31B dense proxy | training | M1000 full photonic compiler stack | 1.66x | 11.92% | 0.00% | 9.6e+07 |
+| Gemma 4 31B dense proxy | training | M1000 switched optical topology only | 1.39x | 11.91% | 0.01% | 8e+07 |
+| Gemma 4 31B dense proxy | training | Advanced chiplet torus + XLA SPMD | 1.23x | 4.75% | 4.65% | 7.08e+07 |
+| Gemma 4 31B dense proxy | training | Ironwood electrical torus + XLA SPMD | 1.00x | 0.00% | 18.58% | 5.77e+07 |
 
 ## Superpod Optimization Ablations
 
@@ -196,22 +216,104 @@ Rows show how much each step contributes relative to the electrical Ironwood bas
 
 | Model | Phase | Technique | Speedup vs baseline | Increment vs previous | Network energy share |
 |---|---|---|---|---|---|
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | baseline | 1.00x | 1.00x | 44.30% |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | advanced chiplet | 3.38x | 3.38x | 32.30% |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | photonic torus + multicast | 5.43x | 1.61x | 6.68% |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | switched topology only | 9.15x | 1.68x | 0.85% |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | multicast cache | 9.70x | 1.06x | 0.39% |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | remote pooled HBM | 10.09x | 1.04x | 0.30% |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | MoE locality routing | 10.36x | 1.03x | 0.28% |
-| Gemini 3.1 Pro-class sparse MoE proxy | inference | full photonic compiler stack | 11.02x | 1.06x | 0.22% |
-| Gemini 3.1 Pro-class sparse MoE proxy | training | baseline | 1.00x | 1.00x | 0.54% |
-| Gemini 3.1 Pro-class sparse MoE proxy | training | advanced chiplet | 1.09x | 1.09x | 0.33% |
-| Gemini 3.1 Pro-class sparse MoE proxy | training | photonic torus + multicast | 1.16x | 1.07x | 0.08% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | baseline | 1.00x | 1.00x | 78.10% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | advanced chiplet | 3.38x | 3.38x | 68.22% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | photonic torus + multicast | 5.43x | 1.61x | 0.39% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | switched topology only | 9.15x | 1.68x | 0.87% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | optical packet switching | 9.44x | 1.03x | 0.39% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | multicast cache | 9.69x | 1.03x | 0.40% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | remote pooled HBM | 10.09x | 1.04x | 0.31% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | MoE locality routing | 10.36x | 1.03x | 0.29% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | full photonic compiler stack | 11.01x | 1.06x | 0.23% |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | baseline | 1.00x | 1.00x | 2.72% |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | advanced chiplet | 1.09x | 1.09x | 1.66% |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | photonic torus + multicast | 1.16x | 1.07x | 0.00% |
 | Gemini 3.1 Pro-class sparse MoE proxy | training | switched topology only | 1.18x | 1.02x | 0.01% |
-| Gemini 3.1 Pro-class sparse MoE proxy | training | multicast cache | 1.25x | 1.06x | 0.01% |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | optical packet switching | 1.22x | 1.03x | 0.01% |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | multicast cache | 1.25x | 1.03x | 0.01% |
 | Gemini 3.1 Pro-class sparse MoE proxy | training | remote pooled HBM | 1.30x | 1.04x | 0.00% |
 | Gemini 3.1 Pro-class sparse MoE proxy | training | MoE locality routing | 1.33x | 1.03x | 0.00% |
 | Gemini 3.1 Pro-class sparse MoE proxy | training | full photonic compiler stack | 1.42x | 1.06x | 0.00% |
+
+## Distance-Parametrized Electrical vs Photonic Energy
+
+Electrical/chiplet links are modeled as low-conversion, distance-dependent transmission energy. Photonic links are modeled as conversion-dominated with a tiny transmission term.
+
+| Nodes | Scenario | Architecture | Avg distance | Effective pJ/bit | Conversion uJ/chip | Transmission uJ/chip |
+|---|---|---|---|---|---|---|
+| 64 | shared-state multicast | electrical torus | 20.0 mm | 39.40 | 109951.16 | 21550427.90 |
+| 64 | shared-state multicast | advanced chiplet torus | 20.0 mm | 23.70 | 54975.58 | 12974237.21 |
+| 64 | shared-state multicast | EVK100 photonic torus | 20.0 mm | 1.85 | 15891.38 | 8.59 |
+| 64 | shared-state multicast | M1000 optical circuit switch | 250.0 mm | 2.29 | 19585.05 | 42.95 |
+| 64 | shared-state multicast | M1000 optical packet switch | 250.0 mm | 2.76 | 23622.32 | 42.95 |
+| 9216 | shared-state multicast | electrical torus | 471.7 mm | 924.80 | 15832967.44 | 73195615619.71 |
+| 9216 | shared-state multicast | advanced chiplet torus | 471.7 mm | 556.75 | 7916483.72 | 44066748179.21 |
+| 9216 | shared-state multicast | EVK100 photonic torus | 471.7 mm | 1.87 | 15891.38 | 202.61 |
+| 9216 | shared-state multicast | M1000 optical circuit switch | 3000.0 mm | 2.34 | 19585.05 | 515.40 |
+| 9216 | shared-state multicast | M1000 optical packet switch | 3000.0 mm | 2.81 | 23622.32 | 515.40 |
+
+## Strong and Weak Scaling
+
+Strong scaling keeps the modeled Gemma/Gemini workload fixed while increasing chip count. Weak scaling scales aggregate request/training tokens with chip count so problem size per resource stays approximately fixed.
+
+| Model | Mode | Chips | Phase | Configuration | Speedup | Energy / work unit |
+|---|---|---|---|---|---|---|
+| Gemma 4 26B MoE proxy | strong | 64 | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 1.37e+03 J |
+| Gemma 4 26B MoE proxy | strong | 64 | inference | M1000 full photonic compiler stack | 9.16x | 788 J |
+| Gemma 4 26B MoE proxy | strong | 64 | training | Ironwood electrical torus + XLA SPMD | 1.00x | 1.02e+05 J |
+| Gemma 4 26B MoE proxy | strong | 64 | training | M1000 full photonic compiler stack | 1.56x | 1.01e+05 J |
+| Gemma 4 26B MoE proxy | strong | 9216 | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 1.32e+04 J |
+| Gemma 4 26B MoE proxy | strong | 9216 | inference | M1000 full photonic compiler stack | 42.43x | 788 J |
+| Gemma 4 26B MoE proxy | strong | 9216 | training | Ironwood electrical torus + XLA SPMD | 1.00x | 1.88e+05 J |
+| Gemma 4 26B MoE proxy | strong | 9216 | training | M1000 full photonic compiler stack | 3.37x | 1.01e+05 J |
+| Gemma 4 26B MoE proxy | weak | 64 | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 1.37e+03 J |
+| Gemma 4 26B MoE proxy | weak | 64 | inference | M1000 full photonic compiler stack | 9.16x | 788 J |
+| Gemma 4 26B MoE proxy | weak | 64 | training | Ironwood electrical torus + XLA SPMD | 1.00x | 1.02e+05 J |
+| Gemma 4 26B MoE proxy | weak | 64 | training | M1000 full photonic compiler stack | 1.56x | 1.01e+05 J |
+| Gemma 4 26B MoE proxy | weak | 9216 | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 1.88e+06 J |
+| Gemma 4 26B MoE proxy | weak | 9216 | inference | M1000 full photonic compiler stack | 43.98x | 1.07e+05 J |
+| Gemma 4 26B MoE proxy | weak | 9216 | training | Ironwood electrical torus + XLA SPMD | 1.00x | 1.88e+05 J |
+| Gemma 4 26B MoE proxy | weak | 9216 | training | M1000 full photonic compiler stack | 3.36x | 1.01e+05 J |
+| Gemma 4 31B dense proxy | strong | 64 | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 2.4e+03 J |
+| Gemma 4 31B dense proxy | strong | 64 | inference | M1000 full photonic compiler stack | 6.42x | 1.61e+03 J |
+| Gemma 4 31B dense proxy | strong | 64 | training | Ironwood electrical torus + XLA SPMD | 1.00x | 7.55e+05 J |
+| Gemma 4 31B dense proxy | strong | 64 | training | M1000 full photonic compiler stack | 1.38x | 7.53e+05 J |
+| Gemma 4 31B dense proxy | strong | 9216 | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 1.82e+04 J |
+| Gemma 4 31B dense proxy | strong | 9216 | inference | M1000 full photonic compiler stack | 27.88x | 1.61e+03 J |
+| Gemma 4 31B dense proxy | strong | 9216 | training | Ironwood electrical torus + XLA SPMD | 1.00x | 8.55e+05 J |
+| Gemma 4 31B dense proxy | strong | 9216 | training | M1000 full photonic compiler stack | 1.66x | 7.53e+05 J |
+| Gemma 4 31B dense proxy | weak | 64 | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 2.4e+03 J |
+| Gemma 4 31B dense proxy | weak | 64 | inference | M1000 full photonic compiler stack | 6.42x | 1.61e+03 J |
+| Gemma 4 31B dense proxy | weak | 64 | training | Ironwood electrical torus + XLA SPMD | 1.00x | 7.55e+05 J |
+| Gemma 4 31B dense proxy | weak | 64 | training | M1000 full photonic compiler stack | 1.38x | 7.53e+05 J |
+| Gemma 4 31B dense proxy | weak | 9216 | inference | Ironwood electrical torus + XLA SPMD | 1.00x | 2.55e+06 J |
+| Gemma 4 31B dense proxy | weak | 9216 | inference | M1000 full photonic compiler stack | 33.34x | 1.89e+05 J |
+| Gemma 4 31B dense proxy | weak | 9216 | training | Ironwood electrical torus + XLA SPMD | 1.00x | 8.54e+05 J |
+| Gemma 4 31B dense proxy | weak | 9216 | training | M1000 full photonic compiler stack | 1.66x | 7.53e+05 J |
+
+## Optical Circuit Switching vs Optical Packet Switching
+
+| Model | Phase | Switching family | Speedup vs OCS topology-only | Network latency share |
+|---|---|---|---|---|
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | OCS full compiler stack | 1.20x | 0.06% |
+| Gemini 3.1 Pro-class sparse MoE proxy | inference | OPS fine-grained | 1.03x | 0.11% |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | OCS full compiler stack | 1.20x | 0.00% |
+| Gemini 3.1 Pro-class sparse MoE proxy | training | OPS fine-grained | 1.03x | 0.00% |
+| Gemma 4 26B MoE proxy | inference | OCS full compiler stack | 1.25x | 0.26% |
+| Gemma 4 26B MoE proxy | inference | OPS fine-grained | 1.06x | 0.50% |
+| Gemma 4 26B MoE proxy | training | OCS full compiler stack | 1.20x | 0.03% |
+| Gemma 4 26B MoE proxy | training | OPS fine-grained | 1.03x | 0.04% |
+
+## Unified Thesis Evidence Chain
+
+| Layer | Question | Evidence | Result | Interpretation |
+|---|---|---|---|---|
+| AccelForge logical memory | Does topology-aware logical memory change measured accelerator cost? | decode_mlp / shared_dram_multicast | 71.95 % energy reduction | Network cost is visible to the mapper through LogicalClusterMemory. |
+| Distributed mapping | Does the best inter-chip communication pattern change? | cluster + TPU cube optimal mapping table | 5.00 of 16 cases | Photonic multicast makes shared-state/cache-fill schedules optimal in cases where electrical prefers exchange. |
+| Compiler/dataflow | Does XLA/Pallas-visible policy change above the local tile mapping? | kv_attention / EVK100 photonic torus | 73.86 % energy gain | Best policy becomes Remote pooled-HBM streaming. |
+| Distance physics | What happens when electrical paths get physically longer? | 9216-node shared-state multicast | 395.21 x electrical/optical pJ/bit | Electrical cost grows with path distance; optical cost is dominated by conversion and fanout. |
+| End-to-end strong/weak scaling | Does the advantage survive when scaling system and workload? | Gemma 4 26B MoE proxy / inference / weak | 43.98 x latency speedup | Strong/weak scaling separates latency shrink from aggregate-throughput scaling. |
+| Optical switching semantics | When might packet switching beat circuit switching? | Gemma 4 26B MoE proxy / inference | 1.06 x vs OCS topology-only | OPS sensitivity is strongest for fine-grained dynamic communication; OCS remains better for bulk multicast/cache-fill. |
 
 ## Sources
 
@@ -237,6 +339,8 @@ Rows show how much each step contributes relative to the electrical Ironwood bas
   https://blog.google/products-and-platforms/products/gemini/gemini-3-flash/
 - **Gemini 3 Deep Think** (2026-02-12): Google released an updated Gemini 3 Deep Think mode for scientific, research, and engineering tasks; it emphasizes longer, more expensive reasoning. Public posts do not disclose model size.
   https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-deep-think/
+- **gemma_4** (2026-04): Google released Gemma 4 open models in E2B, E4B, 26B MoE, and 31B dense sizes, with up to 256K context on larger models, Apache 2.0 licensing, and support for TPU-accelerated serving on Google Cloud. This provides the open-model anchor for the end-to-end proxy workloads.
+  https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/
 - **xla_spmd** (viewed 2026-04-17): PyTorch/XLA SPMD exposes mesh and partition specs; XLA transforms a single-device program into a partitioned program with collectives using sharding annotations. This motivates modeling compiler-visible dataflow choices, not just link swaps.
   https://docs.pytorch.org/xla/master/spmd.html
 - **TPU7x / Ironwood** (last updated 2026-04-15): TPU7x/Ironwood is Google's latest Cloud TPU. A pod has 9216 chips, 2307 BF16 TFLOP/s/chip, 4614 FP8 TFLOP/s/chip, 192 GiB HBM/chip, 7380 GiB/s HBM bandwidth/chip, and 1200 GB/s bidirectional ICI/chip. Google states it is designed for dense and MoE models, pre-training, sampling, and decode-heavy inference.

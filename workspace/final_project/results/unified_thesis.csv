@@ -1,0 +1,7 @@
+layer,question,evidence,result,unit,interpretation
+AccelForge logical memory,Does topology-aware logical memory change measured accelerator cost?,decode_mlp / shared_dram_multicast,71.94908438341182,% energy reduction,Network cost is visible to the mapper through LogicalClusterMemory.
+Distributed mapping,Does the best inter-chip communication pattern change?,cluster + TPU cube optimal mapping table,5.0,of 16 cases,Photonic multicast makes shared-state/cache-fill schedules optimal in cases where electrical prefers exchange.
+Compiler/dataflow,Does XLA/Pallas-visible policy change above the local tile mapping?,kv_attention / EVK100 photonic torus,73.8606645519647,% energy gain,Best policy becomes Remote pooled-HBM streaming.
+Distance physics,What happens when electrical paths get physically longer?,9216-node shared-state multicast,395.21263413542675,x electrical/optical pJ/bit,Electrical cost grows with path distance; optical cost is dominated by conversion and fanout.
+End-to-end strong/weak scaling,Does the advantage survive when scaling system and workload?,Gemma 4 26B MoE proxy / inference / weak,43.978549615564674,x latency speedup,Strong/weak scaling separates latency shrink from aggregate-throughput scaling.
+Optical switching semantics,When might packet switching beat circuit switching?,Gemma 4 26B MoE proxy / inference,1.0627473430933527,x vs OCS topology-only,OPS sensitivity is strongest for fine-grained dynamic communication; OCS remains better for bulk multicast/cache-fill.

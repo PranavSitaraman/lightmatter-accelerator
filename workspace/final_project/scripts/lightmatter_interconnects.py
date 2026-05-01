@@ -8,7 +8,7 @@ Covers all three project milestones:
 
 Plus: TPU cube ICI replacement study using EVK100, L200, L200X, and M1000 class links.
 
-Public sources were checked / dated April 12, 2026.
+Public sources were refreshed May 1, 2026.
 """
 
 from __future__ import annotations
@@ -47,15 +47,9 @@ HBM_LATENCY_PER_BIT_S: float = 1 / (8 * 1200e9)
 # TPU generation reference specs (HotChips 2025, Google Cloud docs)
 # ---------------------------------------------------------------------------
 
-# TPU v4 (2022)
-TPU_V4_TFLOPS_PER_CHIP = 275.0
-TPU_V4_HBM_GB = 32
-TPU_V4_HBM_BANDWIDTH_TBPS = 1.2
-TPU_V4_ICI_BIDIR_GBPS = 600.0   # 3D torus; ~100 GB/s per axis per direction
-
-# TPU v5p (2023)
+# TPU v5p (2023): only the constants actually used by the model are kept;
+# TPU v4 generation values live in the notebook's documentation table.
 TPU_V5P_TFLOPS_PER_CHIP = 459.0
-TPU_V5P_HBM_GB = 95
 TPU_V5P_HBM_BANDWIDTH_TBPS = 2.8
 TPU_V5P_ICI_BIDIR_GBPS = 1200.0  # public: 1200 GB/s per chip
 
@@ -176,6 +170,16 @@ RESEARCH_NOTES: dict[str, dict[str, str]] = {
             "Google released an updated Gemini 3 Deep Think mode for scientific, "
             "research, and engineering tasks; it emphasizes longer, more expensive "
             "reasoning. Public posts do not disclose model size."
+        ),
+    },
+    "gemma_4": {
+        "date": "2026-04",
+        "url": "https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/",
+        "summary": (
+            "Google released Gemma 4 open models in E2B, E4B, 26B MoE, and 31B dense "
+            "sizes, with up to 256K context on larger models, Apache 2.0 licensing, "
+            "and support for TPU-accelerated serving on Google Cloud. This provides "
+            "the open-model anchor for the end-to-end proxy workloads."
         ),
     },
     "xla_spmd": {
@@ -363,6 +367,33 @@ class InterconnectTech:
     router_latency_s: float
     supports_multicast: bool = False
     notes: str = ""
+    conversion_energy_per_bit_j: float | None = None
+    transmission_energy_per_bit_per_mm_j: float = 0.0
+    reference_distance_mm: float = 1.0
+    switching_mode: str = "electrical_packet"
+    reconfiguration_latency_s: float = 0.0
+    packet_latency_s: float = 0.0
+    propagation_latency_s_per_mm: float = 5.0e-12
+
+    def conversion_energy_j(self) -> float:
+        if self.conversion_energy_per_bit_j is not None:
+            return self.conversion_energy_per_bit_j
+        return self.energy_per_bit_j if self.transmission_energy_per_bit_per_mm_j == 0.0 else 0.0
+
+    def energy_per_bit_for_distance(self, distance_mm: float) -> float:
+        if self.transmission_energy_per_bit_per_mm_j == 0.0 and self.conversion_energy_per_bit_j is None:
+            return self.energy_per_bit_j
+        return (
+            self.conversion_energy_j()
+            + max(0.0, distance_mm) * self.transmission_energy_per_bit_per_mm_j
+        )
+
+    def energy_breakdown_for_distance(
+        self, bits: float, distance_mm: float
+    ) -> tuple[float, float]:
+        conversion = bits * self.conversion_energy_j()
+        transmission = bits * max(0.0, distance_mm) * self.transmission_energy_per_bit_per_mm_j
+        return conversion, transmission
 
 
 @dataclass(frozen=True)
@@ -484,6 +515,9 @@ class Topology:
     def contention_factor(self, active_nodes: int, traffic_type: str) -> float:
         return 1.0
 
+    def average_link_distance_mm(self, active_nodes: int) -> float:
+        return 5.0
+
     def effective_bandwidth(
         self, tech: InterconnectTech, active_nodes: int, traffic_type: str
     ) -> float:
@@ -500,8 +534,16 @@ class Topology:
         if bits <= 0:
             return 0.0, 0.0
         bw = self.effective_bandwidth(tech, active_nodes, traffic_type)
-        energy = bits * hops * tech.energy_per_bit_j
-        latency = bits / bw + hops * tech.router_latency_s
+        distance_mm = hops * self.average_link_distance_mm(active_nodes)
+        energy = bits * tech.energy_per_bit_for_distance(distance_mm)
+        switching_latency = tech.reconfiguration_latency_s if tech.switching_mode == "optical_circuit" else 0.0
+        latency = (
+            bits / bw
+            + hops * tech.router_latency_s
+            + distance_mm * tech.propagation_latency_s_per_mm
+            + switching_latency
+            + tech.packet_latency_s
+        )
         return energy, latency
 
     def evaluate(
@@ -517,6 +559,7 @@ class Topology:
 
         if scenario.name == "node_to_node":
             hops = self.average_node_to_node_hops(active_nodes)
+            distance_mm = hops * self.average_link_distance_mm(active_nodes)
             in_e, in_l = self._transfer_energy_latency(
                 traffic.input_read_bits, hops, tech, active_nodes, "node_to_node"
             )
@@ -531,21 +574,30 @@ class Topology:
                 "input_bits": traffic.input_read_bits,
                 "output_bits": traffic.output_write_bits,
                 "hops": hops,
+                "distance_mm": distance_mm,
+                "energy_per_bit_at_distance_pJ": tech.energy_per_bit_for_distance(distance_mm) * 1e12,
             })
 
         elif scenario.name == "node_to_dram":
             hops = self.average_node_to_memory_hops(active_nodes)
+            distance_mm = hops * self.average_link_distance_mm(active_nodes)
             wt_e, wt_l = self._transfer_energy_latency(
                 traffic.weight_read_bits, hops, tech, active_nodes, "node_to_dram"
             )
             read_energy += wt_e
             read_latency += wt_l
-            detail.update({"weight_bits": traffic.weight_read_bits, "hops": hops})
+            detail.update({
+                "weight_bits": traffic.weight_read_bits,
+                "hops": hops,
+                "distance_mm": distance_mm,
+                "energy_per_bit_at_distance_pJ": tech.energy_per_bit_for_distance(distance_mm) * 1e12,
+            })
 
         elif scenario.name == "shared_dram_multicast":
             repeated_bits = traffic.weight_read_bits
             unique_bits = repeated_bits / active_nodes if active_nodes else repeated_bits
             hops = self.multicast_hops(active_nodes)
+            distance_mm = hops * self.average_link_distance_mm(active_nodes)
             if tech.supports_multicast:
                 eff_bits = unique_bits
             else:
@@ -560,6 +612,8 @@ class Topology:
                 "effective_bits": eff_bits,
                 "multicast_fanout": active_nodes,
                 "hops": hops,
+                "distance_mm": distance_mm,
+                "energy_per_bit_at_distance_pJ": tech.energy_per_bit_for_distance(distance_mm) * 1e12,
             })
 
         read_bits = traffic.input_read_bits + traffic.weight_read_bits
@@ -605,6 +659,9 @@ class RingTopology(Topology):
     def contention_factor(self, active_nodes: int, traffic_type: str) -> float:
         return max(1.0, active_nodes / 4.0)
 
+    def average_link_distance_mm(self, active_nodes: int) -> float:
+        return 5.0 * max(1.0, active_nodes / 16.0)
+
 
 class Mesh2DTopology(Topology):
     """2-D rectangular mesh. Hop = Manhattan distance; contention ∝ √N."""
@@ -641,6 +698,9 @@ class Mesh2DTopology(Topology):
     def contention_factor(self, active_nodes: int, traffic_type: str) -> float:
         return max(1.0, math.sqrt(active_nodes))
 
+    def average_link_distance_mm(self, active_nodes: int) -> float:
+        return 5.0 * max(1.0, math.sqrt(active_nodes / max(1, self.x * self.y)))
+
 
 class OpticalCrossbarTopology(Topology):
     """
@@ -666,6 +726,11 @@ class OpticalCrossbarTopology(Topology):
     def contention_factor(self, active_nodes: int, traffic_type: str) -> float:
         # Optical fabric: each wavelength channel is independent — no contention penalty
         return 1.0
+
+    def average_link_distance_mm(self, active_nodes: int) -> float:
+        # Optical fibers may be much longer than package traces; transmission energy is
+        # modeled separately and is intentionally tiny for Lightmatter-style links.
+        return 250.0 * max(1.0, math.sqrt(active_nodes / 64.0))
 
 
 class Torus3DTopology(Topology):
@@ -718,6 +783,11 @@ class Torus3DTopology(Topology):
     def contention_factor(self, active_nodes: int, traffic_type: str) -> float:
         return max(1.0, active_nodes ** (1.0 / 3.0))
 
+    def average_link_distance_mm(self, active_nodes: int) -> float:
+        # A 64-chip cube is the calibration point. Larger slices require more
+        # rack-/cube-scale wiring, so average physical link length grows slowly.
+        return 5.0 * max(1.0, (active_nodes / 64.0) ** (1.0 / 3.0))
+
 
 # ---------------------------------------------------------------------------
 # Interconnect technology catalog
@@ -732,8 +802,13 @@ ELECTRICAL_800G = InterconnectTech(
     notes=(
         "800 Gb/s one-way inferred from TPU v5p's 1200 GB/s bidirectional ICI split over "
         "six nearest-neighbour torus links. Energy 10 pJ/bit and router latency 5 ns are "
-        "modeling assumptions for a high-speed electrical fabric, not public Google disclosures."
+        "modeling assumptions for a high-speed electrical fabric, not public Google disclosures. "
+        "The distance model treats this as mostly transmission energy calibrated at 5 mm/hop."
     ),
+    conversion_energy_per_bit_j=0.2e-12,
+    transmission_energy_per_bit_per_mm_j=1.96e-12,
+    reference_distance_mm=5.0,
+    switching_mode="electrical_packet",
 )
 
 ADVANCED_CHIPLET_3P5T = InterconnectTech(
@@ -745,8 +820,12 @@ ADVANCED_CHIPLET_3P5T = InterconnectTech(
     notes=(
         "Project-requested advanced-packaging baseline: 3.5 Tbps one-way links, "
         "6 pJ/bit per hop. Modeled as high-quality electrical/chiplet fabric without "
-        "native optical multicast."
+        "native optical multicast; the distance model calibrates the 6 pJ/bit value at 5 mm/hop."
     ),
+    conversion_energy_per_bit_j=0.1e-12,
+    transmission_energy_per_bit_per_mm_j=1.18e-12,
+    reference_distance_mm=5.0,
+    switching_mode="electrical_packet",
 )
 
 LIGHTMATTER_EVK50 = InterconnectTech(
@@ -760,6 +839,11 @@ LIGHTMATTER_EVK50 = InterconnectTech(
         "4.6 pJ/bit total wall-plug (2.6 pJ/bit photonics + ~2 pJ/bit off-the-shelf XSR SerDes). "
         "BER < 10^-9 (typically 10^-12), >1 km SMF reach, 25–105 °C."
     ),
+    conversion_energy_per_bit_j=4.55e-12,
+    transmission_energy_per_bit_per_mm_j=0.00005e-12,
+    reference_distance_mm=1000.0,
+    switching_mode="optical_circuit",
+    reconfiguration_latency_s=100e-9,
 )
 
 LIGHTMATTER_EVK100 = InterconnectTech(
@@ -774,6 +858,11 @@ LIGHTMATTER_EVK100 = InterconnectTech(
         "a conservative 3.2 pJ/bit point, so the sensitivity sweeps should be used for that case. "
         "Monolithic PIC integrates MRM modulators, TIAs, Tx drivers on a single chip."
     ),
+    conversion_energy_per_bit_j=1.85e-12,
+    transmission_energy_per_bit_per_mm_j=0.00005e-12,
+    reference_distance_mm=1000.0,
+    switching_mode="optical_circuit",
+    reconfiguration_latency_s=100e-9,
 )
 
 LIGHTMATTER_L200 = InterconnectTech(
@@ -786,6 +875,11 @@ LIGHTMATTER_L200 = InterconnectTech(
         "Passage L200: 32 Tbps optical I/O per chip (56G NRZ, 3D chip-on-wafer, 320 SerDes). "
         "Modeled as 16 Tbps one-way. <5 pJ/bit; bandwidth density >1.5 Tbps/mm."
     ),
+    conversion_energy_per_bit_j=4.45e-12,
+    transmission_energy_per_bit_per_mm_j=0.00005e-12,
+    reference_distance_mm=1000.0,
+    switching_mode="optical_circuit",
+    reconfiguration_latency_s=100e-9,
 )
 
 LIGHTMATTER_L200X = InterconnectTech(
@@ -798,6 +892,11 @@ LIGHTMATTER_L200X = InterconnectTech(
         "Passage L200X: 64 Tbps optical I/O per chip at 112G PAM4, same 3D CoW form factor as L200. "
         "Modeled as 32 Tbps one-way. <5 pJ/bit."
     ),
+    conversion_energy_per_bit_j=4.75e-12,
+    transmission_energy_per_bit_per_mm_j=0.00005e-12,
+    reference_distance_mm=1000.0,
+    switching_mode="optical_circuit",
+    reconfiguration_latency_s=100e-9,
 )
 
 LIGHTMATTER_M1000 = InterconnectTech(
@@ -811,6 +910,29 @@ LIGHTMATTER_M1000 = InterconnectTech(
         "system-level efficiency including laser, 256 fibers, 1024 SerDes lanes, "
         "4,000 mm² active interposer, built-in solid-state OCS. Modeled as 57.3 Tbps one-way."
     ),
+    conversion_energy_per_bit_j=2.28e-12,
+    transmission_energy_per_bit_per_mm_j=0.00002e-12,
+    reference_distance_mm=1000.0,
+    switching_mode="optical_circuit",
+    reconfiguration_latency_s=100e-9,
+)
+
+LIGHTMATTER_M1000_OPS = InterconnectTech(
+    name="Lightmatter M1000 OPS model",
+    link_bandwidth_bps=57.3e12,
+    energy_per_bit_j=2.9e-12,
+    router_latency_s=0.8e-9,
+    supports_multicast=True,
+    notes=(
+        "Analytical optical-packet-switching sensitivity point derived from the M1000 "
+        "bandwidth class. OPS avoids circuit setup on fine-grained traffic but pays "
+        "higher packet/control overhead than the bulk OCS model."
+    ),
+    conversion_energy_per_bit_j=2.75e-12,
+    transmission_energy_per_bit_per_mm_j=0.00002e-12,
+    reference_distance_mm=1000.0,
+    switching_mode="optical_packet",
+    packet_latency_s=1.0e-9,
 )
 
 # Convenience dict of all Lightmatter technologies in bandwidth order
@@ -1033,6 +1155,7 @@ def default_compiler_architectures(
         ("Advanced chiplet torus", Torus3DTopology(*shape), ADVANCED_CHIPLET_3P5T),
         ("EVK100 photonic torus", Torus3DTopology(*shape), LIGHTMATTER_EVK100),
         ("M1000 optical switched fabric", OpticalCrossbarTopology(), LIGHTMATTER_M1000),
+        ("M1000 optical packet fabric", OpticalCrossbarTopology(), LIGHTMATTER_M1000_OPS),
     ]
 
 
@@ -1397,6 +1520,7 @@ def history_to_frame(history: Iterable[IterationRecord]) -> pd.DataFrame:
     """Convert an iteration history into a tidy DataFrame."""
     rows = []
     for r in history:
+        detail = r.network.detail or {}
         rows.append({
             "iteration": r.iteration,
             "total_energy_uJ": r.total_energy_j * 1e6,
@@ -1410,6 +1534,8 @@ def history_to_frame(history: Iterable[IterationRecord]) -> pd.DataFrame:
             "remote_output_kibits": r.traffic.output_write_bits / 1024.0,
             "network_energy_uJ": r.network.total_energy_j * 1e6,
             "network_latency_us": r.network.total_latency_s * 1e6,
+            "network_distance_mm": detail.get("distance_mm", 0.0),
+            "network_effective_pJ_per_bit": detail.get("energy_per_bit_at_distance_pJ", 0.0),
             "mapping_signature": r.mapping_signature,
             "spatial_NodeX_usage": r.mapping_features.get("spatial::NodeArray::NodeX", 0.0),
             "spatial_NodeY_usage": r.mapping_features.get("spatial::NodeArray::NodeY", 0.0),
@@ -1497,6 +1623,12 @@ def compare_topologies(
                         if first_plus_net_latency > 0 else 0.0
                     ),
                     "remote_bits_kib": history[-1].traffic.total_bits / 1024.0,
+                    "network_distance_mm": (
+                        history[-1].network.detail or {}
+                    ).get("distance_mm", 0.0),
+                    "network_effective_pJ_per_bit": (
+                        history[-1].network.detail or {}
+                    ).get("energy_per_bit_at_distance_pJ", 0.0),
                     "first_remote_bits_kib": first_traffic_bits / 1024.0,
                     "remote_bits_change_pct": (
                         100 * (final_traffic_bits / first_traffic_bits - 1.0)
@@ -1576,6 +1708,7 @@ def all_technologies_network_comparison(
     techs = {
         "Electrical 800G": ELECTRICAL_800G,
         "Advanced Chiplet 3.5T": ADVANCED_CHIPLET_3P5T,
+        "M1000 OPS": LIGHTMATTER_M1000_OPS,
         **ALL_LIGHTMATTER_TECHS,
     }
     rows = []
@@ -1585,6 +1718,8 @@ def all_technologies_network_comparison(
             "technology": label,
             "link_bandwidth_tbps": tech.link_bandwidth_bps / 1e12,
             "energy_per_bit_pJ": tech.energy_per_bit_j * 1e12,
+            "conversion_pJ_per_bit": tech.conversion_energy_j() * 1e12,
+            "transmission_pJ_per_bit_per_mm": tech.transmission_energy_per_bit_per_mm_j * 1e12,
             "supports_multicast": tech.supports_multicast,
             "total_energy_uJ": cost.total_energy_j * 1e6,
             "total_latency_us": cost.total_latency_s * 1e6,
@@ -1736,6 +1871,7 @@ def scaling_law_study(
                     active_nodes=nodes,
                 )
                 cost = topology.evaluate(traffic, scenario, tech)
+                detail = cost.detail or {}
                 rows.append({
                     "active_nodes": nodes,
                     "torus_shape": "x".join(str(v) for v in shape),
@@ -1749,6 +1885,11 @@ def scaling_law_study(
                         if scenario.name == "node_to_node"
                         else topology.multicast_hops(nodes)
                     ),
+                    "average_distance_mm": detail.get("distance_mm", 0.0),
+                    "effective_pJ_per_bit_at_distance": detail.get("energy_per_bit_at_distance_pJ", 0.0),
+                    "conversion_pJ_per_bit": tech.conversion_energy_j() * 1e12,
+                    "transmission_pJ_per_bit_per_mm": tech.transmission_energy_per_bit_per_mm_j * 1e12,
+                    "switching_mode": tech.switching_mode,
                     "contention_factor": topology.contention_factor(nodes, scenario.name),
                     "energy_uJ_per_chip": cost.total_energy_j * 1e6,
                     "latency_us_per_chip": cost.total_latency_s * 1e6,
@@ -1869,13 +2010,47 @@ OPTIMIZER_BYTES_PER_PARAM = 8.0
 
 def gemini_proxy_models() -> dict[str, GeminiProxyModel]:
     """
-    Public proxy suite for the latest Gemini-class workload.
+    Public proxy suite for the latest Google LLM workloads.
 
-    Gemini 3/3.1 parameter counts are not public. The proxies below are not
-    claims about Google's confidential architecture; they are explicit system
-    stress points for dense, MoE, and Deep-Think/long-reasoning regimes.
+    Gemma 4 has public open-model sizes, while Gemini 3/3.1 parameter counts
+    are not public. The proxies below are explicit system stress points for
+    dense, MoE, and long-reasoning regimes, not claims about confidential
+    Google model internals.
     """
     return {
+        "gemma4_31b_dense_proxy": GeminiProxyModel(
+            name="Gemma 4 31B dense proxy",
+            model_kind="dense",
+            total_params_b=31.0,
+            active_params_b=31.0,
+            layers=64,
+            hidden_size=8_192,
+            prompt_tokens=131_072,
+            output_tokens=1_024,
+            train_tokens_per_step=67_108_864,
+            disclosure_note=(
+                "Public Gemma 4 large dense open-model point. Exact layer shape is modeled "
+                "as an auditable proxy; the parameter scale and long-context regime follow "
+                "the public Gemma 4 announcement."
+            ),
+        ),
+        "gemma4_26b_moe_proxy": GeminiProxyModel(
+            name="Gemma 4 26B MoE proxy",
+            model_kind="moe",
+            total_params_b=26.0,
+            active_params_b=4.0,
+            layers=48,
+            hidden_size=6_144,
+            moe_experts=16,
+            active_experts=2,
+            prompt_tokens=131_072,
+            output_tokens=1_024,
+            train_tokens_per_step=67_108_864,
+            disclosure_note=(
+                "Public Gemma 4 26B MoE-class open-model point. The exact expert layout "
+                "is represented as a proxy so the system study can remain reproducible."
+            ),
+        ),
         "gemini3_flash_proxy": GeminiProxyModel(
             name="Gemini 3 Flash-class efficient dense proxy",
             model_kind="dense",
@@ -1983,6 +2158,26 @@ def default_superpod_configs(
             compute_efficiency=0.70,
             network_overlap=0.48,
             description="Ablation: replace the fabric only, without compiler/data-placement changes.",
+        ),
+        SuperpodConfig(
+            name="M1000 optical packet switching + XLA SPMD",
+            topology=OpticalCrossbarTopology(),
+            tech=LIGHTMATTER_M1000_OPS,
+            active_chips=active_chips,
+            compiler_strategy="xla_spmd_collective",
+            topology_family="switched-packet",
+            compute_efficiency=0.72,
+            network_overlap=0.62,
+            tensor_parallel_traffic_scale=0.68,
+            remote_weight_traffic_scale=0.18,
+            gradient_traffic_scale=0.72,
+            moe_traffic_scale=0.32,
+            kv_traffic_scale=0.36,
+            cache_reuse_steps=96.0,
+            description=(
+                "Sensitivity point for optical packet switching: better for fine-grained "
+                "dynamic collectives/MoE traffic, less efficient than OCS for bulk multicast."
+            ),
         ),
         SuperpodConfig(
             name="M1000 + multicast cache",
@@ -2121,6 +2316,7 @@ def _stage_row(
     hbm_latency_s = hbm_bits_per_chip / hbm_bandwidth_bps if hbm_bandwidth_bps else 0.0
 
     net = _network_for_stage(config, scenario_name, network_bits_per_chip, multicast_fanout)
+    net_detail = net.detail or {}
     network_energy_j = net.total_energy_j * active
     exposed_network_latency_s = net.total_latency_s * (1.0 - config.network_overlap)
     total_latency_s = max(compute_latency_s, hbm_latency_s) + exposed_network_latency_s
@@ -2162,6 +2358,11 @@ def _stage_row(
         "network_energy_share_pct": 100 * network_energy_j / total_energy_j if total_energy_j else 0.0,
         "bottleneck": bottleneck,
         "average_hops": net.detail.get("hops", 0.0) if net.detail else 0.0,
+        "network_distance_mm": net_detail.get("distance_mm", 0.0),
+        "effective_network_pJ_per_bit": net_detail.get("energy_per_bit_at_distance_pJ", 0.0),
+        "conversion_pJ_per_bit": config.tech.conversion_energy_j() * 1e12,
+        "transmission_pJ_per_bit_per_mm": config.tech.transmission_energy_per_bit_per_mm_j * 1e12,
+        "switching_mode": config.tech.switching_mode,
         "contention_factor": config.topology.contention_factor(active, scenario_name),
         "compute_efficiency_pct": config.compute_efficiency * 100,
         "network_overlap_pct": config.network_overlap * 100,
@@ -2340,7 +2541,12 @@ def evaluate_superpod_stages(
 
 
 def superpod_stage_study(
-    model_names: Iterable[str] = ("gemini3_1_pro_moe_proxy", "gemini3_deepthink_long_context_proxy"),
+    model_names: Iterable[str] = (
+        "gemma4_26b_moe_proxy",
+        "gemma4_31b_dense_proxy",
+        "gemini3_1_pro_moe_proxy",
+        "gemini3_deepthink_long_context_proxy",
+    ),
     configs: Iterable[SuperpodConfig] | None = None,
     active_chips: int = IRONWOOD_SUPERPOD_CHIPS,
 ) -> pd.DataFrame:
@@ -2417,6 +2623,7 @@ def superpod_ablation_frame(summary_df: pd.DataFrame) -> pd.DataFrame:
         "Advanced chiplet torus + XLA SPMD": "advanced chiplet",
         "EVK100 photonic torus + multicast cache": "photonic torus + multicast",
         "M1000 switched optical topology only": "switched topology only",
+        "M1000 optical packet switching + XLA SPMD": "optical packet switching",
         "M1000 + multicast cache": "multicast cache",
         "M1000 + remote pooled HBM": "remote pooled HBM",
         "M1000 + MoE locality routing": "MoE locality routing",
@@ -2485,6 +2692,260 @@ def superpod_context_scaling_study(
     return pd.DataFrame(rows).sort_values(["context_tokens", "configuration"]).reset_index(drop=True)
 
 
+def distance_energy_model_frame(
+    node_counts: Iterable[int] = (16, 64, 256, 1024, 4096, 9216),
+    traffic_gib_per_chip: float = 1.0,
+) -> pd.DataFrame:
+    """
+    Distance-parametrized network study.
+
+    Electrical and advanced-chiplet links are modeled as mostly transmission
+    energy: short links are cheap, but long multi-hop paths accumulate loss. The
+    Lightmatter-style optical links are modeled as mostly conversion/SerDes/laser
+    energy with a tiny transmission term, so distance matters far less than
+    fanout and switching semantics.
+    """
+    bits = traffic_gib_per_chip * 1024**3 * 8
+    rows: list[dict[str, float | str | bool]] = []
+    for nodes in node_counts:
+        shape = torus_shape_for_nodes(nodes)
+        fabrics = [
+            ("electrical torus", Torus3DTopology(*shape), ELECTRICAL_800G),
+            ("advanced chiplet torus", Torus3DTopology(*shape), ADVANCED_CHIPLET_3P5T),
+            ("EVK100 photonic torus", Torus3DTopology(*shape), LIGHTMATTER_EVK100),
+            ("M1000 optical circuit switch", OpticalCrossbarTopology(), LIGHTMATTER_M1000),
+            ("M1000 optical packet switch", OpticalCrossbarTopology(), LIGHTMATTER_M1000_OPS),
+        ]
+        scenarios = [
+            (
+                "all_to_all_activation",
+                scenario_case("node_to_node", active_nodes=nodes),
+                TrafficBreakdown(input_read_bits=bits, output_write_bits=bits),
+            ),
+            (
+                "remote_hbm_fetch",
+                scenario_case("node_to_dram", active_nodes=nodes),
+                TrafficBreakdown(weight_read_bits=bits),
+            ),
+            (
+                "shared_state_multicast",
+                scenario_case("shared_dram_multicast", active_nodes=nodes),
+                TrafficBreakdown(weight_read_bits=bits * nodes),
+            ),
+        ]
+        for architecture, topology, tech in fabrics:
+            for scenario_label, scenario, traffic in scenarios:
+                cost = topology.evaluate(traffic, scenario, tech)
+                detail = cost.detail or {}
+                effective_bits = detail.get("effective_bits", traffic.total_bits)
+                distance_mm = detail.get("distance_mm", 0.0)
+                conversion_j, transmission_j = tech.energy_breakdown_for_distance(
+                    effective_bits, distance_mm
+                )
+                rows.append({
+                    "active_nodes": nodes,
+                    "torus_shape": "x".join(str(v) for v in shape),
+                    "architecture": architecture,
+                    "topology": topology.name,
+                    "technology": tech.name,
+                    "switching_mode": tech.switching_mode,
+                    "scenario": scenario_label,
+                    "traffic_gib_per_chip": traffic_gib_per_chip,
+                    "supports_multicast": tech.supports_multicast,
+                    "average_hops": detail.get("hops", 0.0),
+                    "average_distance_mm": distance_mm,
+                    "effective_pJ_per_bit_at_distance": detail.get("energy_per_bit_at_distance_pJ", 0.0),
+                    "conversion_energy_uJ_per_chip": conversion_j * 1e6,
+                    "transmission_energy_uJ_per_chip": transmission_j * 1e6,
+                    "total_energy_uJ_per_chip": cost.total_energy_j * 1e6,
+                    "total_latency_us_per_chip": cost.total_latency_s * 1e6,
+                })
+    return pd.DataFrame(rows)
+
+
+def strong_weak_superpod_scaling_study(
+    model_names: Iterable[str] = ("gemma4_26b_moe_proxy", "gemma4_31b_dense_proxy"),
+    active_chip_counts: Iterable[int] = (64, 256, 1024, 4096, 9216),
+    scaling_modes: Iterable[str] = ("strong", "weak"),
+) -> pd.DataFrame:
+    """
+    End-to-end strong/weak scaling over the same superpod stage model.
+
+    Strong scaling keeps the public proxy workload fixed while increasing chip
+    count. Weak scaling keeps problem size per resource roughly fixed by scaling
+    aggregate request/training tokens with chip count; this models more concurrent
+    Gemma-style serving/training work rather than a single longer user prompt.
+    """
+    base_models = gemini_proxy_models()
+    rows: list[dict[str, float | str | bool]] = []
+    keep_configs = {
+        "Ironwood electrical torus + XLA SPMD",
+        "Advanced chiplet torus + XLA SPMD",
+        "M1000 optical packet switching + XLA SPMD",
+        "M1000 full photonic compiler stack",
+    }
+    active_chip_counts = tuple(active_chip_counts)
+    baseline_chips = min(active_chip_counts)
+    for model_name in model_names:
+        base_model = base_models[model_name]
+        for chips in active_chip_counts:
+            scale = chips / baseline_chips
+            for mode in scaling_modes:
+                if mode not in {"strong", "weak"}:
+                    raise ValueError(f"Unknown scaling mode: {mode}")
+                workload_scale = 1.0 if mode == "strong" else scale
+                model = GeminiProxyModel(
+                    name=f"{base_model.name} ({mode}, {chips} chips)",
+                    model_kind=base_model.model_kind,
+                    total_params_b=base_model.total_params_b,
+                    active_params_b=base_model.active_params_b,
+                    layers=base_model.layers,
+                    hidden_size=base_model.hidden_size,
+                    moe_experts=base_model.moe_experts,
+                    active_experts=base_model.active_experts,
+                    prompt_tokens=max(1, int(base_model.prompt_tokens * workload_scale)),
+                    output_tokens=max(1, int(base_model.output_tokens * workload_scale)),
+                    train_tokens_per_step=max(1, int(base_model.train_tokens_per_step * workload_scale)),
+                    disclosure_note=base_model.disclosure_note,
+                )
+                configs = [
+                    config for config in default_superpod_configs(chips)
+                    if config.name in keep_configs
+                ]
+                stage_df = pd.DataFrame(
+                    row for config in configs for row in evaluate_superpod_stages(model, config)
+                )
+                summary = superpod_end_to_end_summary(stage_df)
+                summary["base_model_key"] = model_name
+                summary["base_model"] = base_model.name
+                summary["scaling_mode"] = mode
+                summary["workload_scale_vs_64"] = workload_scale
+                summary["active_chip_count"] = chips
+                rows.extend(summary.to_dict("records"))
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df["latency_per_work_unit_s"] = df["total_latency_s"] / df["workload_scale_vs_64"]
+    df["energy_per_work_unit_j"] = df["total_energy_j"] / df["workload_scale_vs_64"]
+    return df.sort_values(["base_model_key", "scaling_mode", "active_chip_count", "phase", "configuration"]).reset_index(drop=True)
+
+
+def optical_switching_study(
+    model_names: Iterable[str] = ("gemma4_26b_moe_proxy", "gemini3_1_pro_moe_proxy"),
+    active_chips: int = IRONWOOD_SUPERPOD_CHIPS,
+) -> pd.DataFrame:
+    """Compare OCS and OPS interpretations of the M1000-class optical fabric."""
+    keep_configs = {
+        "M1000 switched optical topology only",
+        "M1000 optical packet switching + XLA SPMD",
+        "M1000 + multicast cache",
+        "M1000 full photonic compiler stack",
+    }
+    configs = [
+        config for config in default_superpod_configs(active_chips)
+        if config.name in keep_configs
+    ]
+    stage_df = superpod_stage_study(model_names=model_names, configs=configs, active_chips=active_chips)
+    summary = superpod_end_to_end_summary(
+        stage_df,
+        baseline_configuration="M1000 switched optical topology only",
+    )
+    summary["switching_family"] = summary["configuration"].map({
+        "M1000 switched optical topology only": "OCS topology only",
+        "M1000 optical packet switching + XLA SPMD": "OPS fine-grained",
+        "M1000 + multicast cache": "OCS multicast cache",
+        "M1000 full photonic compiler stack": "OCS full compiler stack",
+    }).fillna(summary["configuration"])
+    return summary.sort_values(["model", "phase", "configuration"]).reset_index(drop=True)
+
+
+def unified_thesis_frame(
+    cluster_improvement_df: pd.DataFrame,
+    optimal_mapping_df: pd.DataFrame,
+    optimal_compiler_df: pd.DataFrame,
+    distance_df: pd.DataFrame,
+    strong_weak_df: pd.DataFrame,
+    switching_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Single compact evidence chain for the final thesis."""
+    rows: list[dict[str, str | float]] = []
+    if not cluster_improvement_df.empty:
+        best = cluster_improvement_df.loc[cluster_improvement_df["energy_reduction_pct"].idxmax()]
+        rows.append({
+            "layer": "AccelForge logical memory",
+            "question": "Does topology-aware logical memory change measured accelerator cost?",
+            "evidence": f"{best['workload']} / {best['scenario']}",
+            "result": best["energy_reduction_pct"],
+            "unit": "% energy reduction",
+            "interpretation": "Network cost is visible to the mapper through LogicalClusterMemory.",
+        })
+    if not optimal_mapping_df.empty and "optimal_mapping_changed_vs_baseline" in optimal_mapping_df.columns:
+        changed = optimal_mapping_df[optimal_mapping_df["optimal_mapping_changed_vs_baseline"].astype(bool)]
+        rows.append({
+            "layer": "Distributed mapping",
+            "question": "Does the best inter-chip communication pattern change?",
+            "evidence": "cluster + TPU cube optimal mapping table",
+            "result": float(len(changed)),
+            "unit": f"of {len(optimal_mapping_df)} cases",
+            "interpretation": "Photonic multicast makes shared-state/cache-fill schedules optimal in cases where electrical prefers exchange.",
+        })
+    if not optimal_compiler_df.empty:
+        changed = optimal_compiler_df[optimal_compiler_df["strategy_changed_vs_baseline"].astype(bool)]
+        if not changed.empty:
+            best = changed.loc[changed["energy_gain_vs_baseline_strategy_pct"].idxmax()]
+            rows.append({
+                "layer": "Compiler/dataflow",
+                "question": "Does XLA/Pallas-visible policy change above the local tile mapping?",
+                "evidence": f"{best['workload']} / {best['architecture']}",
+                "result": best["energy_gain_vs_baseline_strategy_pct"],
+                "unit": "% energy gain",
+                "interpretation": f"Best policy becomes {best['strategy_label']}.",
+            })
+    if not distance_df.empty:
+        final = distance_df[
+            (distance_df["active_nodes"] == distance_df["active_nodes"].max())
+            & (distance_df["scenario"] == "shared_state_multicast")
+        ]
+        if not final.empty:
+            electrical = final[final["architecture"] == "electrical torus"].iloc[0]
+            optical = final[final["architecture"] == "M1000 optical circuit switch"].iloc[0]
+            rows.append({
+                "layer": "Distance physics",
+                "question": "What happens when electrical paths get physically longer?",
+                "evidence": "9216-node shared-state multicast",
+                "result": electrical["effective_pJ_per_bit_at_distance"] / optical["effective_pJ_per_bit_at_distance"],
+                "unit": "x electrical/optical pJ/bit",
+                "interpretation": "Electrical cost grows with path distance; optical cost is dominated by conversion and fanout.",
+            })
+    if not strong_weak_df.empty:
+        full = strong_weak_df[
+            strong_weak_df["configuration"].eq("M1000 full photonic compiler stack")
+        ]
+        if not full.empty:
+            best = full.loc[full["speedup_vs_baseline"].idxmax()]
+            rows.append({
+                "layer": "End-to-end strong/weak scaling",
+                "question": "Does the advantage survive when scaling system and workload?",
+                "evidence": f"{best['base_model']} / {best['phase']} / {best['scaling_mode']}",
+                "result": best["speedup_vs_baseline"],
+                "unit": "x latency speedup",
+                "interpretation": "Strong/weak scaling separates latency shrink from aggregate-throughput scaling.",
+            })
+    if not switching_df.empty:
+        ops = switching_df[switching_df["switching_family"].eq("OPS fine-grained")]
+        if not ops.empty:
+            best = ops.loc[ops["speedup_vs_baseline"].idxmax()]
+            rows.append({
+                "layer": "Optical switching semantics",
+                "question": "When might packet switching beat circuit switching?",
+                "evidence": f"{best['model']} / {best['phase']}",
+                "result": best["speedup_vs_baseline"],
+                "unit": "x vs OCS topology-only",
+                "interpretation": "OPS sensitivity is strongest for fine-grained dynamic communication; OCS remains better for bulk multicast/cache-fill.",
+            })
+    return pd.DataFrame(rows)
+
+
 def _normalize_phases(phases: Iterable[str] | None) -> tuple[str, ...]:
     """Validate and normalize phase names used by the superpod workflow."""
     if phases is None:
@@ -2508,7 +2969,12 @@ def _default_superpod_prefix(phases: tuple[str, ...]) -> str:
 def write_superpod_workflow_outputs(
     output_dir: str | Path,
     phases: Iterable[str] | None = None,
-    model_names: Iterable[str] = ("gemini3_1_pro_moe_proxy", "gemini3_deepthink_long_context_proxy"),
+    model_names: Iterable[str] = (
+        "gemma4_26b_moe_proxy",
+        "gemma4_31b_dense_proxy",
+        "gemini3_1_pro_moe_proxy",
+        "gemini3_deepthink_long_context_proxy",
+    ),
     active_chips: int = IRONWOOD_SUPERPOD_CHIPS,
     prefix: str | None = None,
     include_context_scaling: bool = True,
@@ -2634,69 +3100,11 @@ def tpu_cube_case_study() -> pd.DataFrame:
     m1000_one_way_bps = 57.3e12                 # M1000: 114.6 Tbps total / 2 dirs
 
     variants: list[tuple[str, Topology, InterconnectTech]] = [
-        (
-            "TPU v5p electrical torus",
-            electrical_torus,
-            InterconnectTech(
-                name="TPU v5p ICI electrical",
-                link_bandwidth_bps=tpu_v5p_axis_one_way_bps,
-                energy_per_bit_j=10e-12,
-                router_latency_s=5e-9,
-                supports_multicast=False,
-                notes=(
-                    "800 Gb/s one-way per axis inferred from public 1200 GB/s bidirectional ICI "
-                    "split across six nearest-neighbour torus links. Energy 10 pJ/bit assumed."
-                ),
-            ),
-        ),
-        (
-            "Photonic torus (EVK100)",
-            optical_torus,
-            InterconnectTech(
-                name="Photonic torus EVK100",
-                link_bandwidth_bps=photonic_torus_evk100_bps,
-                energy_per_bit_j=1.9e-12,
-                router_latency_s=1.5e-9,
-                supports_multicast=True,
-                notes="4×4×4 torus topology preserved; each axis link upgraded to EVK100-class.",
-            ),
-        ),
-        (
-            "Photonic switched fabric (L200)",
-            optical_crossbar,
-            InterconnectTech(
-                name="Photonic switched L200",
-                link_bandwidth_bps=l200_one_way_bps,
-                energy_per_bit_j=4.5e-12,
-                router_latency_s=2.0e-9,
-                supports_multicast=True,
-                notes="Optical crossbar via L200; 16 Tbps one-way per chip from 32 Tbps total I/O.",
-            ),
-        ),
-        (
-            "Photonic switched fabric (L200X)",
-            optical_crossbar,
-            InterconnectTech(
-                name="Photonic switched L200X",
-                link_bandwidth_bps=l200x_one_way_bps,
-                energy_per_bit_j=4.8e-12,
-                router_latency_s=2.0e-9,
-                supports_multicast=True,
-                notes="Optical crossbar via L200X; 32 Tbps one-way per chip from 64 Tbps total I/O.",
-            ),
-        ),
-        (
-            "Photonic switched fabric (M1000)",
-            optical_crossbar,
-            InterconnectTech(
-                name="Photonic switched M1000",
-                link_bandwidth_bps=m1000_one_way_bps,
-                energy_per_bit_j=2.3e-12,
-                router_latency_s=2.5e-9,
-                supports_multicast=True,
-                notes="M1000 OCS-based crossbar; 57.3 Tbps one-way from 114.6 Tbps aggregate.",
-            ),
-        ),
+        ("TPU v5p electrical torus", electrical_torus, ELECTRICAL_800G),
+        ("Photonic torus (EVK100)", optical_torus, LIGHTMATTER_EVK100),
+        ("Photonic switched fabric (L200)", optical_crossbar, LIGHTMATTER_L200),
+        ("Photonic switched fabric (L200X)", optical_crossbar, LIGHTMATTER_L200X),
+        ("Photonic switched fabric (M1000)", optical_crossbar, LIGHTMATTER_M1000),
     ]
 
     rows = []
@@ -2722,6 +3130,7 @@ def tpu_cube_case_study() -> pd.DataFrame:
         )
         for variant_name, topology, tech in variants:
             net = topology.evaluate(traffic, scenario, tech)
+            detail = net.detail or {}
             rows.append({
                 "case": traffic_name,
                 "variant": variant_name,
@@ -2729,6 +3138,10 @@ def tpu_cube_case_study() -> pd.DataFrame:
                 "technology": tech.name,
                 "effective_link_one_way_tbps": tech.link_bandwidth_bps / 1e12,
                 "energy_pJ_per_bit": tech.energy_per_bit_j * 1e12,
+                "conversion_pJ_per_bit": tech.conversion_energy_j() * 1e12,
+                "transmission_pJ_per_bit_per_mm": tech.transmission_energy_per_bit_per_mm_j * 1e12,
+                "network_distance_mm": detail.get("distance_mm", 0.0),
+                "effective_pJ_per_bit_at_distance": detail.get("energy_per_bit_at_distance_pJ", 0.0),
                 "energy_uJ_per_chip": net.total_energy_j * 1e6,
                 "latency_us_per_chip": net.total_latency_s * 1e6,
                 "notes": tech.notes,
@@ -2925,6 +3338,10 @@ def generate_summary_markdown(
     chiplet_df: pd.DataFrame | None = None,
     superpod_summary_df: pd.DataFrame | None = None,
     superpod_ablation_df: pd.DataFrame | None = None,
+    distance_df: pd.DataFrame | None = None,
+    strong_weak_df: pd.DataFrame | None = None,
+    switching_df: pd.DataFrame | None = None,
+    unified_df: pd.DataFrame | None = None,
 ) -> str:
     lines: list[str] = [
         "# Lightmatter Final Project — Summary",
@@ -2937,7 +3354,8 @@ def generate_summary_markdown(
         "- Re-running the mapper is explicitly measured: the study reports both fixed-point tile/residency sensitivity and the higher-level distributed mapping choice that becomes optimal under each interconnect.",
         "- A separate compiler/dataflow strategy model shows the more important effect: photonic multicast can make software-managed cache fills and shared-state broadcast preferable to classic SPMD activation exchange.",
         "- Scaling-law sweeps show that flat switched photonic fabrics keep hop count and contention nearly constant while torus and chiplet fabrics accumulate hop/contention cost as cubes grow toward superpod scale.",
-        "- The full-superpod study models Gemini 3/3.1-class public proxy workloads on a 9216-chip Ironwood pod and reports end-to-end inference/training speedups by stage and by optimization ablation.",
+        "- The full-superpod study models public Gemma 4 open-model proxies plus Gemini-class stress proxies on Ironwood/TPU7x and reports end-to-end inference/training speedups by stage and by optimization ablation.",
+        "- The latest unified study replaces flat pJ/bit constants with conversion-plus-distance physics, and compares strong scaling, weak scaling, optical circuit switching, and optical packet switching in one end-to-end chain.",
         "- The TPU cube study separates two design points: a conservative EVK100 photonic torus and higher-bandwidth switched-fabric options (L200/L200X/M1000).",
         "- EVK100 public collateral includes both a 1.9 pJ/bit Passage-family value and a more conservative 3.2 pJ/bit EVK100 technical-spec value; this project uses 1.9 pJ/bit as the main optimistic/reference point and includes sensitivity hooks for alternatives.",
         "",
@@ -3097,9 +3515,9 @@ def generate_summary_markdown(
 
     if superpod_summary_df is not None and not superpod_summary_df.empty:
         lines.extend([
-            "## Full-Superpod Gemini-Class End-to-End Study",
+            "## Full-Superpod Gemma/Gemini End-to-End Study",
             "",
-            "Google has not published Gemini 3/3.1 parameter counts, so this section reports explicit dense/MoE proxies rather than claiming confidential model internals.",
+            "Gemma 4 open-model proxies use public size/context facts; Gemini stress proxies remain explicit dense/MoE/long-context assumptions because Google has not published Gemini 3/3.1 parameter counts.",
             "",
             "| Model | Phase | Configuration | Speedup vs electrical | Energy reduction | Network latency share | Throughput tokens/s |",
             "|---|---|---|---|---|---|---|",
@@ -3144,6 +3562,81 @@ def generate_summary_markdown(
                 f"{row.speedup_vs_baseline:.2f}x | "
                 f"{row.speedup_increment_vs_previous:.2f}x | "
                 f"{row.network_energy_share_pct:.2f}% |"
+            )
+        lines.append("")
+
+    if distance_df is not None and not distance_df.empty:
+        lines.extend([
+            "## Distance-Parametrized Electrical vs Photonic Energy",
+            "",
+            "Electrical/chiplet links are modeled as low-conversion, distance-dependent transmission energy. Photonic links are modeled as conversion-dominated with a tiny transmission term.",
+            "",
+            "| Nodes | Scenario | Architecture | Avg distance | Effective pJ/bit | Conversion uJ/chip | Transmission uJ/chip |",
+            "|---|---|---|---|---|---|---|",
+        ])
+        focus = distance_df[
+            (distance_df["active_nodes"].isin([64, 9216]))
+            & (distance_df["scenario"].eq("shared_state_multicast"))
+        ]
+        for row in focus.itertuples(index=False):
+            lines.append(
+                f"| {row.active_nodes} | {humanize_label(row.scenario)} | {humanize_label(row.architecture)} | "
+                f"{row.average_distance_mm:.1f} mm | {row.effective_pJ_per_bit_at_distance:.2f} | "
+                f"{row.conversion_energy_uJ_per_chip:.2f} | {row.transmission_energy_uJ_per_chip:.2f} |"
+            )
+        lines.append("")
+
+    if strong_weak_df is not None and not strong_weak_df.empty:
+        lines.extend([
+            "## Strong and Weak Scaling",
+            "",
+            "Strong scaling keeps the modeled Gemma/Gemini workload fixed while increasing chip count. Weak scaling scales aggregate request/training tokens with chip count so problem size per resource stays approximately fixed.",
+            "",
+            "| Model | Mode | Chips | Phase | Configuration | Speedup | Energy / work unit |",
+            "|---|---|---|---|---|---|---|",
+        ])
+        focus = strong_weak_df[
+            strong_weak_df["configuration"].isin([
+                "Ironwood electrical torus + XLA SPMD",
+                "M1000 full photonic compiler stack",
+            ])
+            & strong_weak_df["active_chip_count"].isin([64, 9216])
+        ]
+        for row in focus.itertuples(index=False):
+            lines.append(
+                f"| {row.base_model} | {row.scaling_mode} | {row.active_chip_count} | "
+                f"{row.phase} | {row.configuration} | {row.speedup_vs_baseline:.2f}x | "
+                f"{row.energy_per_work_unit_j:.3g} J |"
+            )
+        lines.append("")
+
+    if switching_df is not None and not switching_df.empty:
+        lines.extend([
+            "## Optical Circuit Switching vs Optical Packet Switching",
+            "",
+            "| Model | Phase | Switching family | Speedup vs OCS topology-only | Network latency share |",
+            "|---|---|---|---|---|",
+        ])
+        for row in switching_df.itertuples(index=False):
+            if row.switching_family not in {"OPS fine-grained", "OCS full compiler stack"}:
+                continue
+            lines.append(
+                f"| {row.model} | {row.phase} | {row.switching_family} | "
+                f"{row.speedup_vs_baseline:.2f}x | {row.network_latency_share_pct:.2f}% |"
+            )
+        lines.append("")
+
+    if unified_df is not None and not unified_df.empty:
+        lines.extend([
+            "## Unified Thesis Evidence Chain",
+            "",
+            "| Layer | Question | Evidence | Result | Interpretation |",
+            "|---|---|---|---|---|",
+        ])
+        for row in unified_df.itertuples(index=False):
+            lines.append(
+                f"| {row.layer} | {row.question} | {row.evidence} | "
+                f"{row.result:.2f} {row.unit} | {row.interpretation} |"
             )
         lines.append("")
 
@@ -3316,7 +3809,7 @@ def executive_summary_frame(
                 "case": f"{best_speedup['model']} / {best_speedup['phase']}",
                 "value": best_speedup["speedup_vs_baseline"],
                 "unit": "x",
-                "interpretation": "9216-chip Ironwood/Gemini-class proxy with full photonic compiler stack.",
+                "interpretation": "9216-chip Ironwood Gemma/Gemini proxy with full photonic compiler stack.",
             })
             best_energy = photonic.loc[photonic["energy_reduction_vs_baseline_pct"].idxmax()]
             rows.append({
@@ -3425,6 +3918,10 @@ def write_presentation_assets(
     superpod_summary_df: pd.DataFrame | None = None,
     superpod_ablation_df: pd.DataFrame | None = None,
     superpod_context_df: pd.DataFrame | None = None,
+    distance_df: pd.DataFrame | None = None,
+    strong_weak_df: pd.DataFrame | None = None,
+    switching_df: pd.DataFrame | None = None,
+    unified_df: pd.DataFrame | None = None,
 ) -> dict[str, Path]:
     """
     Write concise, presentation-ready deliverables.
@@ -3461,6 +3958,9 @@ def write_presentation_assets(
         "superpod_speedup_plot": presentation_dir / "07_superpod_end_to_end_speedups.png",
         "superpod_stage_plot": presentation_dir / "08_superpod_stage_breakdown.png",
         "superpod_context_plot": presentation_dir / "09_superpod_context_scaling.png",
+        "distance_physics_plot": presentation_dir / "10_distance_physics.png",
+        "strong_weak_plot": presentation_dir / "11_strong_weak_scaling.png",
+        "switching_plot": presentation_dir / "12_ocs_ops_switching.png",
     }
     summary_df.to_csv(paths["executive_summary"], index=False)
     if optimal_mapping_df is not None and not optimal_mapping_df.empty:
@@ -3483,7 +3983,8 @@ def write_presentation_assets(
         "- Compiler/dataflow study: XLA/GSPMD-style collectives versus remote HBM and photonic multicast cache-fill strategies.",
         "- Scaling study: 64-chip to 9216-chip per-chip scaling laws.",
         "- Chiplet comparison: calibration against the 3.5 Tbps / 6 pJ/bit advanced-packaging baseline.",
-        "- SuperPod study: 9216-chip Gemini-class inference/training speedups, stage breakdowns, ablations, and context scaling.",
+        "- SuperPod study: 9216-chip Gemma/Gemini inference/training speedups, stage breakdowns, ablations, and context scaling.",
+        "- Unified end-to-end study: distance-parametrized pJ/bit, strong/weak scaling, and OCS-vs-OPS switching sensitivities.",
         "",
         "## Headline Metrics",
         "",
@@ -3498,6 +3999,7 @@ def write_presentation_assets(
         "## Modeling Notes",
         "",
         "- Topology is not modeled as a pure bandwidth problem: the network model includes hop count, contention, per-hop router latency, and multicast semantics.",
+        "- Link energy is no longer only a constant pJ/bit. Electrical links have low conversion cost and distance-dependent transmission energy; photonic links are conversion-dominated with almost distance-independent transmission.",
         "- The AccelForge loop feeds network read/write energy and latency back into the logical memory level and reruns until convergence, so the mapper can react to in-flight data cost rather than seeing a free global memory.",
         "- The full-superpod stage model converts raw transport time into exposed stall by multiplying raw network latency by the non-overlapped fraction; this is how optical IC affects both transport time and stall time.",
         "- The analytic model does not include packet-level queueing or OCS reconfiguration timing.",
@@ -3670,7 +4172,7 @@ def write_presentation_assets(
                 marker="o",
                 label=config,
             )
-        ax.set_title("Gemini-Class Inference Context Scaling")
+        ax.set_title("Gemma/Gemini Inference Context Scaling")
         ax.set_xlabel("Prompt context tokens")
         ax.set_ylabel("End-to-end inference latency (s)")
         ax.set_xscale("log", base=2)
@@ -3678,6 +4180,76 @@ def write_presentation_assets(
         ax.legend(fontsize=7)
         fig.tight_layout()
         fig.savefig(paths["superpod_context_plot"], dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
+    if distance_df is not None and not distance_df.empty:
+        plot_df = distance_df[distance_df["scenario"].eq("shared_state_multicast")].copy()
+        fig, ax = plt.subplots(figsize=(10, 5))
+        for architecture, group in plot_df.groupby("architecture"):
+            group = group.sort_values("active_nodes")
+            ax.plot(
+                group["active_nodes"],
+                group["effective_pJ_per_bit_at_distance"],
+                marker="o",
+                label=architecture,
+            )
+        ax.set_title("Distance-Parametrized Link Energy")
+        ax.set_xlabel("Active chips")
+        ax.set_ylabel("Effective pJ/bit at average path distance")
+        ax.set_xscale("log", base=2)
+        ax.set_yscale("log")
+        ax.legend(fontsize=7)
+        fig.tight_layout()
+        fig.savefig(paths["distance_physics_plot"], dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
+    if strong_weak_df is not None and not strong_weak_df.empty:
+        focus = strong_weak_df[
+            strong_weak_df["configuration"].isin([
+                "Ironwood electrical torus + XLA SPMD",
+                "M1000 full photonic compiler stack",
+            ])
+            & strong_weak_df["phase"].eq("inference")
+        ].copy()
+        fig, ax = plt.subplots(figsize=(10, 5))
+        for (mode, config), group in focus.groupby(["scaling_mode", "configuration"]):
+            group = group.sort_values("active_chip_count")
+            label = f"{mode} / {config.replace(' + ', ' + ')}"
+            ax.plot(
+                group["active_chip_count"],
+                group["latency_per_work_unit_s"],
+                marker="o",
+                label=label,
+            )
+        ax.set_title("Gemma/Gemini Inference: Strong vs Weak Scaling")
+        ax.set_xlabel("Active chips")
+        ax.set_ylabel("Latency per modeled work unit (s)")
+        ax.set_xscale("log", base=2)
+        ax.set_yscale("log")
+        ax.legend(fontsize=6)
+        fig.tight_layout()
+        fig.savefig(paths["strong_weak_plot"], dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
+    if switching_df is not None and not switching_df.empty:
+        plot_df = switching_df[
+            switching_df["switching_family"].isin(["OPS fine-grained", "OCS full compiler stack"])
+        ].copy()
+        plot_df["label"] = (
+            plot_df["phase"].str.title()
+            + "\n"
+            + plot_df["switching_family"]
+            + "\n"
+            + plot_df["model"].str.replace(" proxy", "", regex=False)
+        )
+        fig, ax = plt.subplots(figsize=(11, 5))
+        ax.bar(plot_df["label"], plot_df["speedup_vs_baseline"], color="#2B8CBE")
+        ax.set_title("M1000 Switching Sensitivity: OCS vs OPS")
+        ax.set_ylabel("Speedup vs M1000 OCS topology-only")
+        ax.tick_params(axis="x", rotation=35, labelsize=7)
+        ax.axhline(1.0, color="black", linewidth=0.8)
+        fig.tight_layout()
+        fig.savefig(paths["switching_plot"], dpi=180, bbox_inches="tight")
         plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(9, 4.2))
@@ -3749,6 +4321,9 @@ def write_study_outputs(
     superpod_summary_df = superpod_end_to_end_summary(superpod_stage_df)
     superpod_ablation_df = superpod_ablation_frame(superpod_summary_df)
     superpod_context_df = superpod_context_scaling_study()
+    distance_df = distance_energy_model_frame()
+    strong_weak_df = strong_weak_superpod_scaling_study()
+    switching_df = optical_switching_study()
     cluster_optimal = optimal_distributed_mapping_frame(
         cluster_df,
         baseline_architecture=f"{Mesh2DTopology(4, 4).name} / {ELECTRICAL_800G.name}",
@@ -3764,6 +4339,14 @@ def write_study_outputs(
     optimal_mapping_df = pd.concat(
         [cluster_optimal, tpu_optimal], ignore_index=True
     )
+    unified_df = unified_thesis_frame(
+        cluster_improvements,
+        optimal_mapping_df,
+        optimal_compiler_df,
+        distance_df,
+        strong_weak_df,
+        switching_df,
+    )
     sources_df = source_frame()
     summary_md = generate_summary_markdown(
         cluster_df,
@@ -3778,6 +4361,10 @@ def write_study_outputs(
         chiplet_df,
         superpod_summary_df,
         superpod_ablation_df,
+        distance_df,
+        strong_weak_df,
+        switching_df,
+        unified_df,
     )
 
     paths: dict[str, Path] = {
@@ -3796,6 +4383,10 @@ def write_study_outputs(
         "superpod_end_to_end_summary": output_dir / "superpod_end_to_end_summary.csv",
         "superpod_ablation_study": output_dir / "superpod_ablation_study.csv",
         "superpod_context_scaling": output_dir / "superpod_context_scaling.csv",
+        "distance_energy_model": output_dir / "distance_energy_model.csv",
+        "strong_weak_scaling": output_dir / "strong_weak_scaling.csv",
+        "optical_switching": output_dir / "optical_switching.csv",
+        "unified_thesis": output_dir / "unified_thesis.csv",
         "sources": output_dir / "sources.csv",
         "summary": output_dir / "summary.md",
     }
@@ -3814,6 +4405,10 @@ def write_study_outputs(
     superpod_summary_df.to_csv(paths["superpod_end_to_end_summary"], index=False)
     superpod_ablation_df.to_csv(paths["superpod_ablation_study"], index=False)
     superpod_context_df.to_csv(paths["superpod_context_scaling"], index=False)
+    distance_df.to_csv(paths["distance_energy_model"], index=False)
+    strong_weak_df.to_csv(paths["strong_weak_scaling"], index=False)
+    switching_df.to_csv(paths["optical_switching"], index=False)
+    unified_df.to_csv(paths["unified_thesis"], index=False)
     sources_df.to_csv(paths["sources"], index=False)
     paths["summary"].write_text(summary_md)
     if include_presentation_assets:
@@ -3832,6 +4427,10 @@ def write_study_outputs(
                 superpod_summary_df,
                 superpod_ablation_df,
                 superpod_context_df,
+                distance_df,
+                strong_weak_df,
+                switching_df,
+                unified_df,
             )
         )
     return paths
@@ -3885,8 +4484,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--models",
-        default="gemini3_1_pro_moe_proxy,gemini3_deepthink_long_context_proxy",
-        help="Comma-separated Gemini proxy model keys for superpod/training/inference studies.",
+        default="gemma4_26b_moe_proxy,gemma4_31b_dense_proxy,gemini3_1_pro_moe_proxy,gemini3_deepthink_long_context_proxy",
+        help="Comma-separated Google LLM proxy model keys for superpod/training/inference studies.",
     )
     parser.add_argument(
         "--active-chips",

@@ -1,17 +1,17 @@
 architecture,scenario,metric,scaling_exponent
-Advanced chiplet torus,all_to_all_activation,energy_uJ_per_chip,0.336159045164463
-Advanced chiplet torus,all_to_all_activation,latency_us_per_chip,0.33333333518316655
-Advanced chiplet torus,shared_state_multicast,energy_uJ_per_chip,1.2945351502222144
-Advanced chiplet torus,shared_state_multicast,latency_us_per_chip,1.333333331178879
-EVK100 photonic torus,all_to_all_activation,energy_uJ_per_chip,0.33615904516446293
-EVK100 photonic torus,all_to_all_activation,latency_us_per_chip,0.33333333460179065
-EVK100 photonic torus,shared_state_multicast,energy_uJ_per_chip,0.2945351502222141
-EVK100 photonic torus,shared_state_multicast,latency_us_per_chip,0.33333331353498413
-M1000 optical switched fabric,all_to_all_activation,energy_uJ_per_chip,0.0
-M1000 optical switched fabric,all_to_all_activation,latency_us_per_chip,0.0
-M1000 optical switched fabric,shared_state_multicast,energy_uJ_per_chip,0.0
-M1000 optical switched fabric,shared_state_multicast,latency_us_per_chip,0.0
-TPU electrical torus,all_to_all_activation,energy_uJ_per_chip,0.336159045164463
-TPU electrical torus,all_to_all_activation,latency_us_per_chip,0.3333333343903811
-TPU electrical torus,shared_state_multicast,energy_uJ_per_chip,1.2945351502222138
-TPU electrical torus,shared_state_multicast,latency_us_per_chip,1.3333333321022167
+Advanced chiplet torus,all_to_all_activation,energy_uJ_per_chip,0.6685197616908272
+Advanced chiplet torus,all_to_all_activation,latency_us_per_chip,0.3333333418760534
+Advanced chiplet torus,shared_state_multicast,energy_uJ_per_chip,1.6271186626847376
+Advanced chiplet torus,shared_state_multicast,latency_us_per_chip,1.3333333311504667
+EVK100 photonic torus,all_to_all_activation,energy_uJ_per_chip,0.002058768299999409
+EVK100 photonic torus,all_to_all_activation,latency_us_per_chip,0.3333318577512615
+EVK100 photonic torus,shared_state_multicast,energy_uJ_per_chip,0.002170634053359536
+EVK100 photonic torus,shared_state_multicast,latency_us_per_chip,0.3333318367066802
+M1000 optical switched fabric,all_to_all_activation,energy_uJ_per_chip,0.004503479664225585
+M1000 optical switched fabric,all_to_all_activation,latency_us_per_chip,1.7327025531366167e-05
+M1000 optical switched fabric,shared_state_multicast,energy_uJ_per_chip,0.004503479664225585
+M1000 optical switched fabric,shared_state_multicast,latency_us_per_chip,1.7327025531474354e-05
+TPU electrical torus,all_to_all_activation,energy_uJ_per_chip,0.6683218536169175
+TPU electrical torus,all_to_all_activation,latency_us_per_chip,0.33333333592018427
+TPU electrical torus,shared_state_multicast,energy_uJ_per_chip,1.6269659890528545
+TPU electrical torus,shared_state_multicast,latency_us_per_chip,1.3333333320957226

@@ -18,7 +18,7 @@ study:
 notebook:
 	$(call run-in-docker,'python3 scripts/generate_lightmatter_notebook.py --output lightmatter_interconnects.ipynb && jupyter nbconvert --to notebook --execute --inplace lightmatter_interconnects.ipynb --ExecutePreprocessor.timeout=2400')
 
-# Run the full 71-test suite.
+# Run the full regression suite.
 test:
 	$(call run-in-docker,'python3 -m unittest discover -s tests -v')
 
@@ -42,7 +42,7 @@ deliverables: report presentation poster technical-summary clean-latex
 
 # Compile the IEEE report twice so references and citations settle.
 report:
-	cd workspace/final_project/proposal && pdflatex -interaction=nonstopmode paper.tex && pdflatex -interaction=nonstopmode paper.tex
+	cd workspace/final_project && pdflatex -interaction=nonstopmode paper.tex && pdflatex -interaction=nonstopmode paper.tex
 
 # Compile the self-contained technical deck.
 presentation:
@@ -50,15 +50,15 @@ presentation:
 
 # Compile the poster required for the project session.
 poster:
-	cd workspace/final_project/proposal && pdflatex -interaction=nonstopmode poster.tex
+	cd workspace/final_project && pdflatex -interaction=nonstopmode poster.tex
 
 # Compile the one-page technical summary sheet.
 technical-summary:
-	cd workspace/final_project/proposal && pdflatex -interaction=nonstopmode technical_summary.tex && pdflatex -interaction=nonstopmode technical_summary.tex
+	cd workspace/final_project && pdflatex -interaction=nonstopmode technical_summary.tex && pdflatex -interaction=nonstopmode technical_summary.tex
 
 # Remove LaTeX build intermediates while keeping PDFs.
 clean-latex:
-	find workspace/final_project workspace/final_project/proposal -maxdepth 1 \( -name '*.aux' -o -name '*.log' -o -name '*.out' -o -name '*.toc' -o -name '*.nav' -o -name '*.snm' -o -name '*.vrb' -o -name '*.synctex.gz' \) -delete
+	find workspace/final_project -maxdepth 1 \( -name '*.aux' -o -name '*.log' -o -name '*.out' -o -name '*.toc' -o -name '*.nav' -o -name '*.snm' -o -name '*.vrb' -o -name '*.synctex.gz' \) -delete
 
 # Remove generated CSV/PNG/Markdown outputs (notebook itself is kept).
 clean-results:

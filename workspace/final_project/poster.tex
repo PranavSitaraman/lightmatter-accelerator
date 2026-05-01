@@ -14,7 +14,7 @@
 \usepackage{enumitem}
 \usepackage{relsize}
 
-\graphicspath{{../results/presentation/}{../results/}}
+\graphicspath{{results/presentation/}{results/}}
 
 \definecolor{DeepNavy}{HTML}{0B1F3A}
 \definecolor{Photon}{HTML}{007C89}
@@ -65,7 +65,7 @@
 % Row 1: motivation | underlying principles (2 cols wide)
 \begin{columns}
 \column{0.32}
-\block{1. Motivation}{
+\block{1. Motivation}{\small
 \textbf{Why photonic interconnect for TPU pods?} Modern LLM systems
 are limited not by matrix-multiply throughput but by the cost of
 moving activations, KV-cache state, expert tokens, gradients, and
@@ -87,7 +87,7 @@ distributed schedule and ask which layer the gain actually lives in.
 }
 
 \column{0.68}
-\block{2. Underlying Principles}{
+\block{2. Underlying Principles}{\small
 \begin{minipage}[t]{0.62\linewidth}
 \textbf{Modeling stack: four layers.}
 \begin{enumerate}
@@ -122,6 +122,10 @@ re-run until stable. Converges in $\le 3$ iterations.
 \textbf{Superpod stage model.}
 $T_{\text{stage}} = \max(T_c, T_{\text{HBM}}) + (1-\alpha) T_{\text{net}}$,
 $E_{\text{stage}} = E_c + E_{\text{HBM}} + E_{\text{net}}$.
+
+\textbf{Distance-aware link model.}
+$E_{\text{link}}=B(e_c+d\,e_{tx/mm})$ separates conversion from
+distance-dependent transmission.
 \end{minipage}\hfill
 \begin{minipage}[t]{0.34\linewidth}
 \centering
@@ -138,12 +142,14 @@ EVK100 & 3.2 & \textbf{3.2/1.9} \\
 L200 & 16 & 4.5 \\
 L200X & 32 & 4.8 \\
 M1000 & 57.3 & \textbf{2.3} \\
+M1000 OPS & 57.3 & 2.9 \\
 \bottomrule
 \end{tabular}\\[0.5em]
 \emph{EVK100: conservative public target / Passage-family sensitivity.
 M1000: 57.3~Tb/s one-way from 114.6~Tb/s bidirectional.}\\[0.35em]
-\textbf{Workloads:} 6 GEMM proxies for LLM stages + Flash (120B
-dense), Pro MoE (4.7T/600B/32K), Deep Think (4.7T/750B/131K).\\[0.3em]
+\textbf{Workloads:} 6 GEMM proxies for LLM stages + Gemma 4
+26B MoE / 31B dense anchors + Gemini-class Flash, Pro MoE, and
+Deep Think stress proxies.\\[0.3em]
 \textbf{What we hold fixed:} compute, MAC array, register, UB, HBM,
 HBM \pjbit{}/latency. Only interconnect, topology, and schedule vary.
 \end{minipage}
@@ -153,7 +159,7 @@ HBM \pjbit{}/latency. Only interconnect, topology, and schedule vary.
 % Row 2: evaluation | results figure 1 | results figure 2
 \begin{columns}
 \column{0.32}
-\block{3. Evaluation}{
+\block{3. Evaluation}{\small
 \textbf{Experiments.}
 \begin{enumerate}
 \item 16-node AccelForge cluster -- electrical $4{\times}4$ mesh vs
@@ -163,16 +169,19 @@ EVK100/L200/L200X/M1000.
 \item Distributed compiler-visible schedule comparison.
 \item Scaling sweep -- 64 to 9216 chips.
 \item Advanced chiplet baseline (3.5~\tbps{}, 6~\pjbit{}).
-\item 9216-chip Ironwood-class superpod -- Gemini Flash / Pro MoE /
-Deep Think proxies.
+\item Distance-parametrized electrical/chiplet/photonic energy.
+\item Strong and weak scaling; OCS vs OPS optical switching sensitivity.
+\item 9216-chip Ironwood-class superpod -- Gemma 4 anchors + Gemini
+stress proxies.
 \item Ablation ladder isolating link-energy, topology, multicast,
 schedule, and full photonic stack.
 \end{enumerate}
 
 \textbf{Reproducibility.} \texttt{make study \&\& make notebook \&\&
-make test} in the AccelForge Docker image. 71 unit/integration
-tests assert the technology table, network model, mapper-loop
-convergence, scaling exponents, and superpod summaries.
+make test} in the AccelForge Docker image. The regression suite
+asserts the technology table, distance model, network model,
+mapper-loop convergence, scaling exponents, switching sensitivity,
+and superpod summaries.
 
 \textbf{Bias controls.}
 (i)~Multiple Lightmatter sources cross-checked; TPU values from
@@ -181,31 +190,32 @@ Google Cloud docs and Hot Chips 2025.
 explanation.
 (iii)~Optical multicast modelled optimistically as one logical
 broadcast -- explicit assumption.
-(iv)~Gemini parameter counts unpublished, so we use proxy stress
-workloads, clearly labelled as proxies.
+(iv)~Gemma 4 sizes are public; Gemini parameter counts are unpublished,
+so those are clearly labelled stress proxies.
+(v)~OPS is a sensitivity point, not a Lightmatter product claim.
 }
 
 \column{0.34}
-\block{4. Topology / Compiler}{
+\block{4. Topology / Compiler}{\small
 \centering
 \includegraphics[width=\linewidth]{02_tpu_mapping_reductions.png}\\
-\smaller \emph{TPU cube: M1000 multicast removes 99.91\% of network energy.}\\[0.5em]
+\smaller \emph{TPU cube: multicast removes up to 99.93\% of network energy.}\\[0.5em]
 \includegraphics[width=\linewidth]{04_compiler_strategy_choices.png}\\
 \smaller \emph{Compiler-visible schedule changes whenever multicast becomes available.}
 }
 
 \column{0.34}
-\block{5. Superpod}{
+\block{5. Superpod}{\small
 \centering
 \includegraphics[width=\linewidth]{07_superpod_end_to_end_speedups.png}\\
-\smaller \emph{Long-context inference benefits 14.50$\times$; training only 1.43$\times$.}\\[0.5em]
-\includegraphics[width=\linewidth]{05_scaling_laws.png}\\
-\smaller \emph{Optical multicast scaling exponent stays at 0.00 across 64$\to$9216 chips.}
+\smaller \emph{Gemma 4 MoE inference benefits 42.43$\times$; larger stress-proxy training is 1.43$\times$.}\\[0.5em]
+\includegraphics[width=\linewidth]{10_distance_physics.png}\\
+\smaller \emph{Distance-aware model: electrical/chiplet paths get more expensive as pods scale.}
 }
 \end{columns}
 
 % Row 3: full-width results
-\block{6. Results and Analysis of Results}{
+\block{6. Results and Analysis of Results}{\small
 \textbf{Three key insights.}
 \begin{enumerate}
 \item \textbf{The intra-chip mapping is stable; the distributed
@@ -217,19 +227,20 @@ shared-DRAM multicast), and the optimal compiler-visible schedule
 changes whenever multicast becomes available. Reporting these as
 separate layers matches the 6.5930 mapping formalism cleanly. This
 is the central conceptual finding.
-\item \textbf{Hardware multicast, not raw bandwidth, dominates
+\item \textbf{Hardware multicast and distance-insensitive transport,
+not raw bandwidth, dominate
 shared-state workloads.} The 3.5~\tbps{}, 6~\pjbit{} chiplet
 baseline is still beaten by M1000 by \textbf{99.85\%} on shared-DRAM
 multicast: $N$ unicasts collapse to one logical broadcast, and
 contention disappears on a switched fabric. The same chiplet is
 competitive on node-to-node activation exchange.
 \item \textbf{Photonics is not a uniform multiplier.} On the
-9216-chip superpod, long-context inference reaches
-\textbf{14.50}$\times$ speedup; training reaches only
-\textbf{1.43}$\times$. Once collectives shrink, training becomes
-compute-dominated; inference stays network-exposed because decode and
-MoE routing cross the fabric every step. The strong case is
-inference and long-context serving, not training payoff.
+9216-chip superpod, Gemma 4 MoE inference reaches
+\textbf{42.43}$\times$ speedup; the larger long-context Gemini stress
+proxy still reaches \textbf{14.50}$\times$. Training improves less:
+\textbf{3.37}$\times$ on Gemma 4 MoE and \textbf{1.43}$\times$ on
+the larger stress proxy. The strong case is inference and long-context
+serving, not only training payoff.
 \end{enumerate}
 
 \begin{minipage}[t]{0.42\linewidth}
@@ -238,12 +249,12 @@ inference and long-context serving, not training payoff.
 \toprule
 Axis & Value & Setting & Axis & Value & Setting \\
 \midrule
-16-node energy red.   & 72.21\%        & EVK100 MC          & Compiler best gain    & 67.75\%        & M1000 stream \\
+16-node energy red.   & 71.95\%        & EVK100 MC          & Compiler best gain    & 73.86\%        & EVK100 stream \\
 16-node latency red.  & 97.57\%        & EVK100 MC          & Multicast slope       & 0.00           & M1000 64$\to$9216 \\
-TPU cube net energy   & 99.91\%        & M1000 MC           & Chiplet vs M1000      & 99.85\%        & MC \\
-TPU cube map energy   & 77.70\%        & M1000 KV           & Inference speedup     & 14.50$\times$  & Deep Think \\
-Inner maps changed    & 0/24           & cube               & Training speedup      & 1.43$\times$   & Pro MoE \\
-Distributed maps      & 5/16           & cluster            & Inference energy      & 51.07\%        & Deep Think \\
+TPU cube net energy   & 99.93\%        & EVK100 MC          & Chiplet vs M1000      & 99.85\%        & MC \\
+TPU cube map energy   & 77.45\%        & EVK100 KV          & Inference speedup     & 42.43$\times$  & Gemma 4 MoE \\
+Inner maps changed    & 0/24           & cube               & Training speedup      & 3.37$\times$   & Gemma 4 MoE \\
+Distributed maps      & 5/16           & cluster            & Gemini stress inf.    & 14.50$\times$  & Deep Think \\
 \bottomrule
 \end{tabular}
 \end{minipage}\hfill
@@ -255,21 +266,24 @@ pooled remote HBM; cache-fill / weight-broadcast traffic.\\[0.4em]
 (electrical torus already efficient at one hop); compute-dominated
 training stages; mappings already optimal on electrical.\\[0.4em]
 \textbf{What worked / did not.} Worked: feedback loop converged in
-$\le 3$ iterations; multicast asymmetry as predicted; superpod stage
-model reproduced inference-vs-training divergence. Did not work:
-encoding the inter-chip NoC as a degenerate \texttt{!Memory} inside
-AccelForge produced opaque numbers; we kept the network model
-external. The inner mapping signature did not change -- an honest
-negative result we report rather than hide.
+$\le 3$ iterations, multicast asymmetry appeared as predicted, and
+superpod stages separated inference from training. Did not work:
+encoding the inter-chip NoC as a degenerate \texttt{!Memory}; the
+external topology model was clearer and easier to audit.
 \end{minipage}
 \\[0.4em]
-\textbf{Future work.} Direct XLA/Pallas integration; cycle-accurate
-optical-switch simulator; co-design of MoE expert placement under
-photonic locality; pipeline-parallel + ZeRO-3 training stage model.
+\textbf{Additional scaling finding.} Strong scaling reveals compute/HBM
+limits; weak scaling shows why flat optical multicast is attractive
+for serving more concurrent long-context work. OCS is best for bulk
+cache fill; OPS is modeled as a fine-grained dynamic-traffic
+sensitivity point.\\[0.4em]
+\textbf{Future work.} Direct XLA/Pallas integration, cycle-accurate
+optical-switch simulation, MoE expert placement under photonic
+locality, and pipeline-parallel / ZeRO-style training models.
 }
 
 % Row 4: full-width references
-\block{7. References}{
+\block{7. References}{\small
 \smaller
 [1]~Sze \& Emer, MIT 6.5930 lectures: \emph{Mapping},
 \emph{Mapping/Partitioning}, \emph{Advanced Technologies}, Spring 2026.
@@ -287,8 +301,8 @@ Rack Scale Systems,'' Hot Chips 2025 Tutorial.
 \quad
 [5]~PyTorch/XLA, ``SPMD user guide.''
 \quad
-[6]~Google, ``Gemini 3'' (Nov.~2025), ``Gemini 3 Deep Think''
-(Feb.~2026).
+[6]~Google, ``Gemma 4'' (Apr.~2026), ``Gemini 3'' (Nov.~2025),
+``Gemini 3 Deep Think'' (Feb.~2026).
 }
 
 \end{document}

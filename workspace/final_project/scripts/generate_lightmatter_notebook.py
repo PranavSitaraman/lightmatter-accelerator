@@ -77,7 +77,7 @@ analyze the resulting architecture.
     cells.append(md(
         """## Research Basis
 
-All specifications below were verified against public sources as of **April 17, 2026**.
+All specifications below were verified against public sources as of **May 1, 2026**.
 
 | Source | Key Numbers |
 |---|---|
@@ -90,13 +90,15 @@ All specifications below were verified against public sources as of **April 17, 
 | Lightmatter world-record press release (Mar 2026) | **1.6 Tbps/fiber** at 112G PAM4 |
 | Google Cloud TPU v5p docs | **1200 GB/s** bidirectional ICI/chip, 4×4×4 torus |
 | Google Cloud TPU7x docs | Ironwood/TPU7x: **9216 chips**, **2307 BF16 / 4614 FP8 TFLOP/s/chip**, **192 GiB HBM/chip**, **1200 GB/s ICI/chip** |
+| Google Gemma 4 announcement | Gemma 4 open models: E2B, E4B, **26B MoE**, **31B dense**, up to **256K context** for large models |
 | Google Gemini 3 / 3.1 public posts | Latest Gemini family is public, but parameter counts and expert layouts are **not disclosed** |
 | HotChips 2025 TPU rack tutorial | Ironwood: **4614 TFLOPS**, 7.4 TBps HBM, 6 cube faces × 16 links each |
 
 Two modeling assumptions are **not** publicly disclosed and are treated as explicit assumptions:
-- Electrical-link dynamic energy: **10 pJ/bit**
+- Electrical-link dynamic energy is modeled as conversion plus distance-dependent transmission, with **10 pJ/bit at a 5 mm reference path**
 - Per-hop router latency: **5 ns** (electrical) / **1–2.5 ns** (optical)
 - Gemini 3/3.1 architecture: modeled with explicit dense/MoE public proxy workloads, not confidential Google internals
+- Gemma 4 open-model proxies: modeled directly from public 26B MoE / 31B dense size and context facts, with simplified layer/hidden dimensions used only to stress the communication model
 
 These are intentionally conservative and easy to change in `scripts/lightmatter_interconnects.py`.
 EVK100 energy is the one intentional optimistic/reference value: public Lightmatter pages expose
@@ -129,6 +131,7 @@ from scripts.lightmatter_interconnects import (
     LIGHTMATTER_L200,
     LIGHTMATTER_L200X,
     LIGHTMATTER_M1000,
+    LIGHTMATTER_M1000_OPS,
     ALL_LIGHTMATTER_TECHS,
     # Topology models
     RingTopology,
@@ -164,6 +167,10 @@ from scripts.lightmatter_interconnects import (
     superpod_end_to_end_summary,
     superpod_ablation_frame,
     superpod_context_scaling_study,
+    distance_energy_model_frame,
+    strong_weak_superpod_scaling_study,
+    optical_switching_study,
+    unified_thesis_frame,
     all_technologies_network_comparison,
     bandwidth_sensitivity_network,
     energy_per_bit_sensitivity_network,
@@ -1153,6 +1160,7 @@ tpu_optimal_mappings = optimal_distributed_mapping_frame(
     tpu_mapping_df,
     baseline_architecture="TPU cube electrical torus",
 )
+tpu_optimal_mappings.to_csv(RESULTS_DIR / "optimal_mapping_choices.csv", index=False)
 tpu_optimal_mappings[
     [
         "workload", "architecture", "optimal_distributed_mapping",
@@ -1350,21 +1358,21 @@ plt.show()
     ))
 
     cells.append(md(
-        """## Full Superpod Gemini-Class End-to-End Study
+        """## Full Superpod Gemma/Gemini End-to-End Study
 
-This is the core end-to-end system study. Google has publicly identified Gemini 3 and
-Gemini 3.1 as the current Gemini family, and TPU7x/Ironwood exposes public superpod
-specifications. Google does **not** publish Gemini 3/3.1 parameter counts or expert
-layouts, so the model below uses explicit public proxy workloads:
+This is the core end-to-end system study. Google has publicly announced Gemma 4
+open models and public TPU7x/Ironwood superpod specifications. Google has also
+publicly identified Gemini 3 and Gemini 3.1 as the current Gemini family, but does
+**not** publish their parameter counts or expert layouts. The model below therefore
+uses two classes of workloads:
 
-- a speed-optimized dense Gemini 3 Flash-class proxy,
-- a 4.7T-parameter sparse MoE proxy motivated by Lightmatter's public 256-expert / 8-active-expert study,
-- a long-context Deep Think-style proxy that stresses prefill, KV traffic, and expert routing.
+- Gemma 4 public open-model proxies: 26B MoE and 31B dense with long-context stress.
+- Gemini-class stress proxies: dense Flash-like, sparse MoE, and Deep Think-style long-context cases.
 
-The purpose is not to claim confidential Gemini internals. The purpose is to quantify
-which end-to-end stages would improve on a 9216-chip Ironwood superpod if the fabric
-changed from electrical torus links to Lightmatter-style photonic topologies and if XLA/Pallas
-could exploit the resulting new data-placement choices.
+The purpose is not to claim confidential internals. The purpose is to quantify which
+end-to-end stages improve on a 9216-chip Ironwood superpod if the fabric changes from
+electrical torus links to Lightmatter-style photonic topologies and if XLA/Pallas can
+exploit the resulting data-placement choices.
 """
     ))
 
@@ -1373,7 +1381,7 @@ could exploit the resulting new data-placement choices.
 print(f"Ironwood superpod: {IRONWOOD_SUPERPOD_CHIPS} chips = {IRONWOOD_SUPERPOD_CUBES} cubes")
 print(f"Per chip: {IRONWOOD_TFLOPS_PER_CHIP:.0f} FP8 TFLOP/s, {IRONWOOD_HBM_BANDWIDTH_TBPS:.1f} TB/s HBM")
 print()
-print("Gemini-class proxy workloads:")
+print("Gemma/Gemini proxy workloads:")
 for key, model in gemini_proxy_models().items():
     print(
         f"  {key:34s} kind={model.model_kind:5s} "
@@ -1548,6 +1556,184 @@ plt.show()
 """
     ))
 
+    cells.append(md(
+        """## Unified End-to-End Scaling Study
+
+The earlier experiments isolate separate questions: AccelForge logical-memory cost,
+distributed mapping choice, compiler strategy, cube replacement, and superpod stages.
+This section ties them together with the physical effect that motivated the final
+revision of the model: electrical and photonic links should not both be treated as
+flat constant-pJ/bit wires.
+
+The link-energy model is now:
+
+\\[
+E_{link}(B,d)=B\\,(E_{conv}+dE_{tx/mm})
+\\]
+
+where electrical and chiplet links use a small conversion term and a distance-dependent
+transmission term, while photonic links are conversion/SerDes/laser dominated with a
+tiny distance term. Topology determines the average path distance through hop count and
+the average physical link length. This makes scaling visible: larger torus systems pay
+for more links and longer average paths, while switched photonic fabrics are closer to
+fanout- and distance-independent for multicast-style traffic.
+"""
+    ))
+
+    cells.append(code(
+        """
+distance_df = distance_energy_model_frame()
+distance_df.to_csv(RESULTS_DIR / "distance_energy_model.csv", index=False)
+
+distance_df[
+    (distance_df["scenario"] == "shared_state_multicast")
+    & (distance_df["active_nodes"].isin([64, 9216]))
+][
+    [
+        "active_nodes", "architecture", "switching_mode", "average_distance_mm",
+        "effective_pJ_per_bit_at_distance", "conversion_energy_uJ_per_chip",
+        "transmission_energy_uJ_per_chip", "total_latency_us_per_chip",
+    ]
+].sort_values(["active_nodes", "architecture"]).reset_index(drop=True)
+"""
+    ))
+
+    cells.append(code(
+        """
+plot_df = distance_df[distance_df["scenario"] == "shared_state_multicast"].copy()
+fig, ax = plt.subplots(figsize=(11, 5))
+for architecture, group in plot_df.groupby("architecture"):
+    group = group.sort_values("active_nodes")
+    ax.plot(group["active_nodes"], group["effective_pJ_per_bit_at_distance"], marker="o", label=architecture)
+ax.set_title("Distance-Parametrized Link Energy: Shared-State Multicast")
+ax.set_xlabel("Active chips")
+ax.set_ylabel("Effective pJ/bit at average path distance")
+ax.set_xscale("log", base=2)
+ax.set_yscale("log")
+ax.legend(fontsize=7)
+plt.tight_layout()
+plt.savefig(RESULTS_DIR / "distance_physics.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""
+    ))
+
+    cells.append(md(
+        """### Strong vs Weak Scaling
+
+Strong scaling keeps the modeled request or training step fixed while adding chips.
+Weak scaling increases aggregate tokens with chip count so that work per resource is
+approximately fixed. These are different questions. Strong scaling measures latency
+compression and exposes Amdahl-style limits; weak scaling asks whether the fabric can
+support more concurrent work without per-unit cost exploding.
+"""
+    ))
+
+    cells.append(code(
+        """
+strong_weak_df = strong_weak_superpod_scaling_study()
+strong_weak_df.to_csv(RESULTS_DIR / "strong_weak_scaling.csv", index=False)
+
+strong_weak_df[
+    strong_weak_df["configuration"].isin([
+        "Ironwood electrical torus + XLA SPMD",
+        "M1000 full photonic compiler stack",
+    ])
+    & strong_weak_df["active_chip_count"].isin([64, 9216])
+][
+    [
+        "base_model", "scaling_mode", "active_chip_count", "phase", "configuration",
+        "speedup_vs_baseline", "latency_per_work_unit_s", "energy_per_work_unit_j",
+    ]
+].sort_values(["base_model", "scaling_mode", "active_chip_count", "phase", "configuration"])
+"""
+    ))
+
+    cells.append(code(
+        """
+focus = strong_weak_df[
+    strong_weak_df["configuration"].isin([
+        "Ironwood electrical torus + XLA SPMD",
+        "M1000 full photonic compiler stack",
+    ])
+    & (strong_weak_df["phase"] == "inference")
+].copy()
+
+fig, ax = plt.subplots(figsize=(11, 5))
+for (mode, config), group in focus.groupby(["scaling_mode", "configuration"]):
+    group = group.sort_values("active_chip_count")
+    ax.plot(group["active_chip_count"], group["latency_per_work_unit_s"], marker="o", label=f"{mode} / {config}")
+ax.set_title("Inference Strong vs Weak Scaling")
+ax.set_xlabel("Active chips")
+ax.set_ylabel("Latency per modeled work unit (s)")
+ax.set_xscale("log", base=2)
+ax.set_yscale("log")
+ax.legend(fontsize=6)
+plt.tight_layout()
+plt.savefig(RESULTS_DIR / "strong_weak_scaling.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""
+    ))
+
+    cells.append(md(
+        """### Optical Circuit Switching vs Optical Packet Switching
+
+M1000's public product page emphasizes optical circuit switching. The model also includes
+an explicit optical-packet-switching sensitivity point. This does not claim an announced
+Lightmatter packet switch product; it answers a design question: if fine-grained dynamic
+traffic were packet switched, would the compiler choose a different point than a bulk
+OCS multicast/cache-fill schedule?
+"""
+    ))
+
+    cells.append(code(
+        """
+switching_df = optical_switching_study()
+switching_df.to_csv(RESULTS_DIR / "optical_switching.csv", index=False)
+
+switching_df[
+    [
+        "model", "phase", "configuration", "switching_family",
+        "speedup_vs_baseline", "energy_reduction_vs_baseline_pct",
+        "network_latency_share_pct",
+    ]
+].sort_values(["model", "phase", "speedup_vs_baseline"], ascending=[True, True, False])
+"""
+    ))
+
+    cells.append(code(
+        """
+plot_df = switching_df[
+    switching_df["switching_family"].isin(["OPS fine-grained", "OCS full compiler stack"])
+].copy()
+plot_df["label"] = plot_df["phase"].str.title() + "\\n" + plot_df["switching_family"] + "\\n" + plot_df["model"].str.replace(" proxy", "", regex=False)
+
+fig, ax = plt.subplots(figsize=(12, 5))
+ax.bar(plot_df["label"], plot_df["speedup_vs_baseline"], color="#2B8CBE")
+ax.set_title("M1000 Switching Sensitivity: OCS vs OPS")
+ax.set_ylabel("Speedup vs OCS topology-only")
+ax.axhline(1.0, color="black", linewidth=0.8)
+ax.tick_params(axis="x", rotation=35, labelsize=7)
+plt.tight_layout()
+plt.savefig(RESULTS_DIR / "ocs_ops_switching.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""
+    ))
+
+    cells.append(code(
+        """
+unified_df = unified_thesis_frame(
+    improvements,
+    tpu_optimal_mappings,
+    optimal_compiler,
+    distance_df,
+    strong_weak_df,
+    switching_df,
+)
+unified_df.to_csv(RESULTS_DIR / "unified_thesis.csv", index=False)
+unified_df
+"""
+    ))
+
     # ------------------------------------------------------------------ #
     # Section 16: Summary pivot
     # ------------------------------------------------------------------ #
@@ -1625,11 +1811,12 @@ print(tpu_best.to_string())
    not just a faster link but an on-chip OCS that enables dynamic reconfiguration
    of the network fabric without static cabling changes.
 
-9. **For a full 9216-chip Ironwood superpod running Gemini-class proxy workloads,**
+9. **For a full 9216-chip Ironwood superpod running Gemma/Gemini proxy workloads,**
    inference is the main beneficiary: the M1000 full photonic compiler stack improves
-   long-context / MoE inference by roughly an order of magnitude in the analytic model.
-   Training still improves, but by a smaller amount because forward/backward compute
-   dominates once collectives and expert routing stop being the bottleneck.
+   the Gemma 4 MoE proxy by more than an order of magnitude and still gives a large
+   speedup on the longer-context Gemini stress proxy. Training improves less because
+   forward/backward compute dominates once collectives and expert routing stop being
+   the bottleneck.
 
 10. **The most defensible project claim is not "photonic links make every workload faster."**
     The stronger claim is more nuanced: photonics changes which distributed memory and

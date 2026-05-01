@@ -31,6 +31,7 @@ from scripts.lightmatter_interconnects import (
     LIGHTMATTER_L200,
     LIGHTMATTER_L200X,
     LIGHTMATTER_M1000,
+    LIGHTMATTER_M1000_OPS,
     ALL_LIGHTMATTER_TECHS,
     # Topologies
     RingTopology,
@@ -68,6 +69,10 @@ from scripts.lightmatter_interconnects import (
     superpod_end_to_end_summary,
     superpod_ablation_frame,
     superpod_context_scaling_study,
+    distance_energy_model_frame,
+    strong_weak_superpod_scaling_study,
+    optical_switching_study,
+    unified_thesis_frame,
     write_superpod_workflow_outputs,
     all_technologies_network_comparison,
     bandwidth_sensitivity_network,
@@ -141,14 +146,54 @@ class TestTechnologyCatalog(unittest.TestCase):
         self.assertGreater(pro.total_params_b, pro.active_params_b)
         self.assertIn("not a disclosed", pro.disclosure_note)
 
+    def test_gemma4_proxy_models_are_included(self):
+        models = gemini_proxy_models()
+        self.assertIn("gemma4_26b_moe_proxy", models)
+        self.assertIn("gemma4_31b_dense_proxy", models)
+        self.assertEqual(models["gemma4_26b_moe_proxy"].model_kind, "moe")
+        self.assertEqual(models["gemma4_31b_dense_proxy"].model_kind, "dense")
+        self.assertGreaterEqual(models["gemma4_31b_dense_proxy"].prompt_tokens, 131072)
+
     def test_default_superpod_configs_include_full_stack(self):
         configs = default_superpod_configs()
         names = {config.name for config in configs}
         self.assertIn("M1000 full photonic compiler stack", names)
+        self.assertIn("M1000 optical packet switching + XLA SPMD", names)
         full = [config for config in configs if config.name == "M1000 full photonic compiler stack"][0]
         baseline = [config for config in configs if config.name == "Ironwood electrical torus + XLA SPMD"][0]
         self.assertGreater(full.compute_efficiency, baseline.compute_efficiency)
         self.assertEqual(full.active_chips, IRONWOOD_SUPERPOD_CHIPS)
+
+    def test_distance_energy_separates_conversion_and_transmission(self):
+        short = ELECTRICAL_800G.energy_per_bit_for_distance(5.0)
+        long = ELECTRICAL_800G.energy_per_bit_for_distance(50.0)
+        self.assertGreater(long, short)
+        optical_short = LIGHTMATTER_M1000.energy_per_bit_for_distance(5.0)
+        optical_long = LIGHTMATTER_M1000.energy_per_bit_for_distance(500.0)
+        self.assertLess(optical_long / optical_short, 1.01)
+        self.assertEqual(LIGHTMATTER_M1000_OPS.switching_mode, "optical_packet")
+
+    def test_electrical_crosses_over_photonic_at_long_distance(self):
+        # Central physics claim: electrical pays a per-distance transmission
+        # cost (resistance + signaling loss), photonic does not. So at very
+        # short distances electrical can win on raw pJ/bit, but at large
+        # cluster-scale distances photonic must win. This regression test
+        # asserts the crossover so a future tweak to the catalog can't
+        # silently invert the model.
+        short_mm = 5.0
+        long_mm = 1000.0
+        elec_short = ELECTRICAL_800G.energy_per_bit_for_distance(short_mm)
+        photonic_short = LIGHTMATTER_M1000.energy_per_bit_for_distance(short_mm)
+        elec_long = ELECTRICAL_800G.energy_per_bit_for_distance(long_mm)
+        photonic_long = LIGHTMATTER_M1000.energy_per_bit_for_distance(long_mm)
+        self.assertGreater(
+            elec_long, photonic_long,
+            "Photonic must beat electrical at long distance",
+        )
+        self.assertGreater(
+            elec_long / elec_short, photonic_long / photonic_short,
+            "Electrical must scale faster than photonic with distance",
+        )
 
     def test_evk100_faster_than_electrical(self):
         self.assertGreater(
@@ -350,7 +395,7 @@ class TestSweepFunctions(unittest.TestCase):
         )
         expected = {
             "Electrical 800G", "Advanced Chiplet 3.5T",
-            "EVK50", "EVK100", "L200", "L200X", "M1000",
+            "EVK50", "EVK100", "L200", "L200X", "M1000", "M1000 OPS",
         }
         found = set(df["technology"])
         self.assertEqual(found, expected)
@@ -405,6 +450,63 @@ class TestSweepFunctions(unittest.TestCase):
         full_stack = df[df["configuration"] == "M1000 full photonic compiler stack"]
         self.assertTrue((full_stack["speedup_vs_baseline"] > 1.0).all())
 
+    def test_distance_energy_model_frame_reports_distance_physics(self):
+        df = distance_energy_model_frame(node_counts=(64, 9216), traffic_gib_per_chip=0.001)
+        self.assertIn("average_distance_mm", df.columns)
+        self.assertIn("conversion_energy_uJ_per_chip", df.columns)
+        self.assertIn("transmission_energy_uJ_per_chip", df.columns)
+        electrical = df[
+            (df["architecture"] == "electrical torus")
+            & (df["scenario"] == "shared_state_multicast")
+        ].sort_values("active_nodes")
+        self.assertGreater(
+            electrical.iloc[-1]["effective_pJ_per_bit_at_distance"],
+            electrical.iloc[0]["effective_pJ_per_bit_at_distance"],
+        )
+
+    def test_strong_weak_scaling_reports_both_modes(self):
+        df = strong_weak_superpod_scaling_study(
+            model_names=("gemma4_26b_moe_proxy",),
+            active_chip_counts=(64, 256),
+        )
+        self.assertEqual(set(df["scaling_mode"]), {"strong", "weak"})
+        self.assertIn("latency_per_work_unit_s", df.columns)
+        self.assertIn("energy_per_work_unit_j", df.columns)
+        full = df[df["configuration"] == "M1000 full photonic compiler stack"]
+        self.assertTrue((full["speedup_vs_baseline"] > 1.0).all())
+
+    def test_optical_switching_study_contains_ocs_and_ops(self):
+        df = optical_switching_study(model_names=("gemma4_26b_moe_proxy",), active_chips=64)
+        self.assertIn("OPS fine-grained", set(df["switching_family"]))
+        self.assertIn("OCS full compiler stack", set(df["switching_family"]))
+        self.assertTrue((df["speedup_vs_baseline"] >= 1.0).all())
+
+    def test_unified_thesis_frame_links_all_layers(self):
+        cluster = pd.DataFrame([
+            {"workload": "w", "scenario": "shared_dram_multicast", "energy_reduction_pct": 72.0}
+        ])
+        mapping = pd.DataFrame([
+            {"optimal_mapping_changed_vs_baseline": True}
+        ])
+        compiler = pd.DataFrame([
+            {
+                "strategy_changed_vs_baseline": True,
+                "energy_gain_vs_baseline_strategy_pct": 67.0,
+                "workload": "w",
+                "architecture": "a",
+                "strategy_label": "remote pooled-HBM streaming",
+            }
+        ])
+        distance = distance_energy_model_frame(node_counts=(9216,), traffic_gib_per_chip=0.001)
+        strong_weak = strong_weak_superpod_scaling_study(
+            model_names=("gemma4_26b_moe_proxy",),
+            active_chip_counts=(64,),
+        )
+        switching = optical_switching_study(model_names=("gemma4_26b_moe_proxy",), active_chips=64)
+        unified = unified_thesis_frame(cluster, mapping, compiler, distance, strong_weak, switching)
+        self.assertGreaterEqual(len(unified), 5)
+        self.assertIn("Distance physics", set(unified["layer"]))
+
     def test_inference_workflow_outputs_are_phase_specific(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = write_superpod_workflow_outputs(
@@ -453,7 +555,7 @@ class TestSourceFrame(unittest.TestCase):
         source_ids = set(df["source"])
         for required in ("lightmatter_evk100", "lightmatter_evk50", "tpu_v5p",
                          "tpu_rack_hotchips", "lightmatter_m1000", "tpu7x",
-                         "gemini_3", "gemini_3_1_release_notes"):
+                         "gemini_3", "gemini_3_1_release_notes", "gemma_4"):
             self.assertIn(required, source_ids, f"Missing source: {required}")
 
     def test_all_urls_start_with_https(self):
@@ -653,7 +755,11 @@ class TestArtifactWriter(unittest.TestCase):
             self.assertIn("TPU-Speak Translation", summary)
             self.assertIn("TPU Cube Mapping Adaptation", summary)
             self.assertIn("Optimal Distributed Mapping Choices", summary)
-            self.assertIn("Full-Superpod Gemini-Class", summary)
+            self.assertIn("Full-Superpod Gemma/Gemini", summary)
+            self.assertIn("Distance-Parametrized Electrical vs Photonic Energy", summary)
+            self.assertIn("Strong and Weak Scaling", summary)
+            self.assertIn("Optical Circuit Switching vs Optical Packet Switching", summary)
+            self.assertIn("Unified Thesis Evidence Chain", summary)
 
     def test_tpu_case_study_has_five_variants(self):
         tpu_df = tpu_cube_case_study()
@@ -708,7 +814,7 @@ class TestArtifactWriter(unittest.TestCase):
             node_shape=(2, 2, 2),
             hbm_gib=8,
         )
-        non_baseline = df[df["variant"] != "Electrical torus"]
+        non_baseline = df[df["variant"] != "TPU cube electrical torus"]
         self.assertGreater(len(non_baseline), 0)
         differs = non_baseline["mapping_differs_from_electrical"]
         self.assertFalse(
@@ -739,8 +845,13 @@ class TestArtifactWriter(unittest.TestCase):
             self.assertTrue(Path(paths["optimal_mapping_choices"]).exists())
             self.assertTrue(Path(paths["superpod_end_to_end_summary"]).exists())
             self.assertTrue(Path(paths["superpod_context_scaling"]).exists())
+            self.assertTrue(Path(paths["distance_energy_model"]).exists())
+            self.assertTrue(Path(paths["strong_weak_scaling"]).exists())
+            self.assertTrue(Path(paths["optical_switching"]).exists())
+            self.assertTrue(Path(paths["unified_thesis"]).exists())
             self.assertIn("Modeling Notes", presentation_index)
             self.assertIn("TPU-Speak Translation", presentation_index)
+            self.assertIn("distance-parametrized", presentation_index)
 
     def test_optimal_distributed_mapping_frame_detects_candidate_choices(self):
         df = pd.DataFrame([
@@ -801,7 +912,7 @@ class TestNotebookBuilder(unittest.TestCase):
     def test_notebook_imports_all_new_techs(self):
         nb = build_notebook()
         code_cells = "\n".join(c.source for c in nb.cells if c.cell_type == "code")
-        for tech in ("LIGHTMATTER_EVK50", "LIGHTMATTER_L200X", "LIGHTMATTER_M1000"):
+        for tech in ("LIGHTMATTER_EVK50", "LIGHTMATTER_L200X", "LIGHTMATTER_M1000", "LIGHTMATTER_M1000_OPS"):
             self.assertIn(tech, code_cells, f"Notebook code should import {tech}")
 
     def test_notebook_has_superpod_section(self):
@@ -811,6 +922,13 @@ class TestNotebookBuilder(unittest.TestCase):
             any("Full Superpod" in s or "Gemini-Class" in s for s in md_cells),
             "Notebook should have a full-superpod Gemini-class section"
         )
+
+    def test_notebook_has_unified_scaling_section(self):
+        nb = build_notebook()
+        md_cells = [c.source for c in nb.cells if c.cell_type == "markdown"]
+        self.assertTrue(any("Unified End-to-End Scaling Study" in s for s in md_cells))
+        self.assertTrue(any("Strong vs Weak Scaling" in s for s in md_cells))
+        self.assertTrue(any("Optical Circuit Switching" in s for s in md_cells))
 
 
 # =========================================================================

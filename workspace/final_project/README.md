@@ -10,17 +10,17 @@ AccelForge's iterative hardware mapper.
 
 | File | Description |
 |---|---|
-| `proposal/paper.tex` / `proposal/paper.pdf` | **Self-contained IEEE report** — background, related work, model, experiments, results, limitations, and required usage disclosure. |
-| `proposal/technical_summary.tex` / `proposal/technical_summary.pdf` | **One-page technical summary** — project facts, contributions, key insights, reproducibility, and threats to validity. |
-| `proposal/poster.tex` / `proposal/poster.pdf` | **Poster deliverable** — title, group members, motivation, underlying principles, evaluation, results/analysis, and references. |
+| `paper.tex` / `paper.pdf` | **Self-contained IEEE report** — background, related work, model, experiments, results, limitations, and required usage disclosure. |
+| `technical_summary.tex` / `technical_summary.pdf` | **One-page technical summary** — project facts, contributions, key insights, reproducibility, and threats to validity. |
+| `poster.tex` / `poster.pdf` | **Poster deliverable** — title, group members, motivation, underlying principles, evaluation, results/analysis, and references. |
 | `presentation.tex` / `presentation.pdf` | **Self-contained presentation** — slide deck plus discussion notes and replication map. |
-| `lightmatter_interconnects.ipynb` | **Main executed notebook** — all 3 milestones + TPU cube ICI study + mapping-choice analysis + compiler/dataflow strategies + scaling laws + chiplet baseline + full-superpod Gemini-class study. 80 cells, fully executed, 0 errors. |
-| `scripts/lightmatter_interconnects.py` | Core study engine: topology models, iterative solver, mapping signatures, TPU cube mapping study, compiler/dataflow study, scaling laws, full-superpod model, technology catalog, sweep functions, CLI. |
+| `lightmatter_interconnects.ipynb` | **Main executed notebook** — all 3 milestones + TPU cube ICI study + mapping-choice analysis + compiler/dataflow strategies + scaling laws + chiplet baseline + distance physics + strong/weak scaling + OCS/OPS + full-superpod Gemma/Gemini study. |
+| `scripts/lightmatter_interconnects.py` | Core study engine: topology models, iterative solver, mapping signatures, TPU cube mapping study, compiler/dataflow study, scaling laws, distance-parametrized energy model, full-superpod model, technology catalog, sweep functions, CLI. |
 | `scripts/generate_lightmatter_notebook.py` | Programmatic notebook generator. |
-| `tests/test_lightmatter_project.py` | 70-test suite covering all components. |
+| `tests/test_lightmatter_project.py` | Regression suite covering pure network logic, AccelForge smoke paths, generated artifacts, notebook structure, distance physics, strong/weak scaling, OCS/OPS, and superpod workflows. |
 | `arch/tpu_lightmatter_cluster.yaml` | AccelForge architecture: 2D/3D logical cluster memory + node array + HBM + UB + MAC. |
 | `workload/single_matmul.yaml` | Parameterized GEMM workload template (M, K, N, bits). |
-| `results/presentation/` | Concise final-report package: executive summary, topology diagram, and nine condensed plots. |
+| `results/presentation/` | Concise final-report package: executive summary, topology diagram, and twelve condensed plots. |
 
 ## Course Concept Map
 
@@ -34,6 +34,7 @@ This project uses the 6.5930 mapping vocabulary explicitly:
 | Dataflow vs. distributed schedule | Intra-chip dataflow can remain stable while compiler-visible distributed policies, such as multicast cache fill or remote HBM streaming, change. |
 | Calculating data motion | Mapper action counts become bits, then topology equations price hop count, contention, and multicast fanout. |
 | Emerging technologies | Lightmatter-style photonics is evaluated as a system-level change: lower pJ/bit, flatter topology, multicast, pooled memory, and new compiler choices. |
+| Scaling laws | Strong scaling, weak scaling, and topology-dependent average path distance are separated explicitly. |
 
 ## Technology Catalog
 
@@ -45,6 +46,7 @@ This project uses the 6.5930 mapping vocabulary explicitly:
 | **L200** | 16 Tbps | 4.5 | Yes | Product page (32 Tbps total) |
 | **L200X** | 32 Tbps | 4.8 | Yes | Product page (64 Tbps total) |
 | **M1000** | 57.3 Tbps | 2.3 | Yes + OCS | M1000 EVK product page (114.6 Tbps total bi-directional) |
+| **M1000 OPS sensitivity** | 57.3 Tbps | 2.9 | Yes + OPS model | Analytical packet-switching sensitivity point, not a claimed product SKU |
 | **Advanced Chiplet 3.5T** | 3.5 Tbps | 6.0 per hop | No | Prompt-specified advanced packaging baseline |
 
 ## Key Results
@@ -75,9 +77,13 @@ The added compiler/dataflow model captures an XLA/GSPMD-style choice among shard
 
 Scaling studies now compare cube growth from 64 chips to superpod scale against a prompt-specified advanced chiplet baseline of 3.5 Tb/s and 6 pJ/bit/hop. The photonic switched-fabric model has flat per-chip scaling exponents for the modeled traffic cases, while torus/chiplet traffic grows with hop count. Against the advanced chiplet baseline, M1000 optical switching reaches about 87-90 % lower energy for unicast/refill traffic and about 99.85 % lower energy for multicast-shared state in the 64-chip cube case.
 
-### Full Superpod Gemini-Class Result
+### Distance Physics + Strong/Weak Scaling Result
 
-The project now models public Gemini 3/3.1-class proxy workloads on a full 9216-chip Ironwood/TPU7x pod. Because Google does not publish Gemini 3/3.1 parameter counts, the study uses explicit dense, sparse MoE, and long-context proxies rather than claiming confidential model internals. The M1000 full photonic compiler stack reaches 14.5x modeled inference latency speedup for the long-context proxy and 1.43x modeled training-step speedup, showing the key distinction: inference remains network/cache/expert-routing sensitive, while training becomes compute dominated once collectives are reduced.
+The project no longer treats all interconnects as flat pJ/bit constants. Electrical and chiplet links use a small conversion term plus a distance-dependent transmission term calibrated to the original reference energy at a 5 mm path. Photonic links are modeled as conversion/SerDes/laser dominated with tiny distance-dependent transmission. This makes scaling explicit: larger torus/chiplet systems accumulate average path distance and hop cost, while switched photonic fabrics keep shared-state multicast close to fanout independent. The study also separates strong scaling, which shrinks a fixed workload with more chips, from weak scaling, which increases aggregate tokens with chip count to keep work per resource roughly fixed.
+
+### Full Superpod Gemma/Gemini-Class Result
+
+The project now models public Gemma 4 open-model proxies and Gemini 3/3.1-class stress proxies on a full 9216-chip Ironwood/TPU7x pod. Gemma 4 is grounded in public size/context facts, while Gemini proxy workloads are explicit stress cases because Google does not publish Gemini 3/3.1 parameter counts. The M1000 full photonic compiler stack reaches 42.43x modeled inference latency speedup for the Gemma 4 26B MoE proxy and 14.50x for the longer-context Gemini stress proxy. Training improves less: 3.37x on Gemma 4 MoE and 1.43x on the larger stress proxy, showing the key distinction that inference remains network/cache/expert-routing sensitive while larger training phases become compute dominated once collectives are reduced.
 
 ## Generated Outputs (results/)
 
@@ -99,10 +105,14 @@ superpod_stage_study.csv   — stage-level Gemini-class inference/training super
 superpod_end_to_end_summary.csv — end-to-end training/inference totals and speedups
 superpod_ablation_study.csv — topology/compiler/dataflow ablation ladder
 superpod_context_scaling.csv — long-context inference scaling sensitivity
+distance_energy_model.csv    — conversion plus distance-dependent transmission sweep
+strong_weak_scaling.csv      — strong/weak scaling on Gemma/Gemini superpod proxies
+optical_switching.csv        — OCS vs OPS switching sensitivity
+unified_thesis.csv           — compact evidence chain tying all project layers together
 inference_*                 — inference-only superpod workflow artifacts
 training_*                  — training-only superpod workflow artifacts
 superpod_*                  — combined training/inference superpod workflow artifacts
-presentation/              — concise executive summary + 9 chart/diagram assets
+presentation/              — concise executive summary + 12 chart/diagram assets
 sources.csv                — research bibliography
 summary.md                 — highlights report
 *.png                      — all plots (tech_catalog, convergence, heatmap, ...)
@@ -125,7 +135,7 @@ make notebook
 # Rebuild report/presentation/poster/summary PDFs
 make deliverables
 
-# Run all 70 tests
+# Run the full regression suite
 make test
 
 # Production validation: tests + full artifact regeneration
@@ -150,3 +160,4 @@ All targets run inside the AccelForge Docker container (`timeloopaccelergy/accel
 | Extended: sensitivity + scaling | `bandwidth_sensitivity_network`, `energy_per_bit_sensitivity_network`, `scaling_law_study`, notebook §Sensitivity and §Scaling Laws |
 | Stronger advanced-packaging baseline | `ADVANCED_CHIPLET_3P5T`, `chiplet_comparison_frame`, notebook §Advanced Chiplet Baseline |
 | Full-superpod Gemini-class study | `superpod_stage_study`, `superpod_end_to_end_summary`, `superpod_ablation_frame`, notebook §Full Superpod |
+| Unified distance/scaling/switching study | `distance_energy_model_frame`, `strong_weak_superpod_scaling_study`, `optical_switching_study`, `unified_thesis_frame`, notebook §Unified End-to-End Scaling |
