@@ -1321,7 +1321,7 @@ plt.show()
     cells.append(md(
         """## Stronger Baseline: Advanced Chiplet Interconnect
 
-To avoid making the electrical baseline too weak, we also compare against the requested
+To avoid making the electrical baseline too weak, we also compare against a
 advanced-packaging point: **3.5 Tbps one-way links** and **6 pJ/bit per hop**.
 This is modeled as a strong chiplet torus without native multicast.
 """

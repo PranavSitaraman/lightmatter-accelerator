@@ -47,7 +47,7 @@ This project uses the 6.5930 mapping vocabulary explicitly:
 | **L200X** | 32 Tbps | 4.8 | Yes | Product page (64 Tbps total) |
 | **M1000** | 57.3 Tbps | 2.3 | Yes + OCS | M1000 EVK product page (114.6 Tbps total bi-directional) |
 | **M1000 OPS sensitivity** | 57.3 Tbps | 2.9 | Yes + OPS model | Analytical packet-switching sensitivity point, not a claimed product SKU |
-| **Advanced Chiplet 3.5T** | 3.5 Tbps | 6.0 per hop | No | Prompt-specified advanced packaging baseline |
+| **Advanced Chiplet 3.5T** | 3.5 Tbps | 6.0 per hop | No | Advanced packaging baseline |
 
 ## Key Results
 
@@ -75,7 +75,7 @@ The added compiler/dataflow model captures an XLA/GSPMD-style choice among shard
 
 ### Scaling + Stronger Baseline Result
 
-Scaling studies now compare cube growth from 64 chips to superpod scale against a prompt-specified advanced chiplet baseline of 3.5 Tb/s and 6 pJ/bit/hop. The photonic switched-fabric model has flat per-chip scaling exponents for the modeled traffic cases, while torus/chiplet traffic grows with hop count. Against the advanced chiplet baseline, M1000 optical switching reaches about 87-90 % lower energy for unicast/refill traffic and about 99.85 % lower energy for multicast-shared state in the 64-chip cube case.
+Scaling studies now compare cube growth from 64 chips to superpod scale against an advanced chiplet baseline of 3.5 Tb/s and 6 pJ/bit/hop. The photonic switched-fabric model has flat per-chip scaling exponents for the modeled traffic cases, while torus/chiplet traffic grows with hop count. Against the advanced chiplet baseline, M1000 optical switching reaches about 87-90 % lower energy for unicast/refill traffic and about 99.85 % lower energy for multicast-shared state in the 64-chip cube case.
 
 ### Distance Physics + Strong/Weak Scaling Result
 

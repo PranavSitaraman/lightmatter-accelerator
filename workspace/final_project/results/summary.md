@@ -160,7 +160,7 @@ Lower exponents mean better scaling as the system grows from one 64-chip cube to
 
 ## Advanced Chiplet Baseline
 
-The chiplet baseline uses the requested 3.5 Tbps one-way, 6 pJ/bit per-hop model.
+The chiplet baseline uses a 3.5 Tbps one-way, 6 pJ/bit per-hop model.
 
 | Scenario | Architecture | Energy reduction vs chiplet | Latency reduction vs chiplet |
 |---|---|---|---|
@@ -351,5 +351,5 @@ Strong scaling keeps the modeled Gemma/Gemini workload fixed while increasing ch
   https://cloud.google.com/blog/products/compute/inside-the-ironwood-tpu-codesigned-ai-stack/
 - **tpu_rack_hotchips** (2025-08-24): Ironwood (2025): 4614 TFLOPS/chip, 192 GB HBM, 7.4 TBps HBM BW. 4x4x4 torus building block; 6 cube faces × 16 ICI links each. 96 optical + 80 copper + 64 PCB ICI connections per rack. Rack power-cap SLO < 15 ms; burst TDP window = 100 ms.
   https://hc2025.hotchips.org/assets/program/tutorials/HC2025.T1DCRacks.S7.Pankaj.pdf
-- **advanced_chiplet_baseline** (project modeling assumption): Advanced-packaging comparison point requested by the project prompt: 3.5 Tbps one-way link bandwidth and 6 pJ/bit per network hop.
+- **advanced_chiplet_baseline** (project modeling assumption): Advanced-packaging comparison point: 3.5 Tbps one-way link bandwidth and 6 pJ/bit per network hop.
   https://docs.cloud.google.com/tpu/docs/v5p

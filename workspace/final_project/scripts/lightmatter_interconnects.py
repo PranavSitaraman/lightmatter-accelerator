@@ -234,7 +234,7 @@ RESEARCH_NOTES: dict[str, dict[str, str]] = {
         "date": "project modeling assumption",
         "url": "https://docs.cloud.google.com/tpu/docs/v5p",
         "summary": (
-            "Advanced-packaging comparison point requested by the project prompt: "
+            "Advanced-packaging comparison point: "
             "3.5 Tbps one-way link bandwidth and 6 pJ/bit per network hop."
         ),
     },
@@ -818,7 +818,7 @@ ADVANCED_CHIPLET_3P5T = InterconnectTech(
     router_latency_s=2.0e-9,
     supports_multicast=False,
     notes=(
-        "Project-requested advanced-packaging baseline: 3.5 Tbps one-way links, "
+        "Advanced-packaging baseline: 3.5 Tbps one-way links, "
         "6 pJ/bit per hop. Modeled as high-quality electrical/chiplet fabric without "
         "native optical multicast; the distance model calibrates the 6 pJ/bit value at 5 mm/hop."
     ),
@@ -2129,7 +2129,7 @@ def default_superpod_configs(
             topology_family="torus",
             compute_efficiency=0.65,
             network_overlap=0.42,
-            description="Stronger electrical/advanced-packaging baseline requested in the prompt.",
+            description="Stronger electrical/advanced-packaging baseline.",
         ),
         SuperpodConfig(
             name="EVK100 photonic torus + multicast cache",
@@ -3499,7 +3499,7 @@ def generate_summary_markdown(
         lines.extend([
             "## Advanced Chiplet Baseline",
             "",
-            "The chiplet baseline uses the requested 3.5 Tbps one-way, 6 pJ/bit per-hop model.",
+            "The chiplet baseline uses a 3.5 Tbps one-way, 6 pJ/bit per-hop model.",
             "",
             "| Scenario | Architecture | Energy reduction vs chiplet | Latency reduction vs chiplet |",
             "|---|---|---|---|",
