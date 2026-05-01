@@ -4,9 +4,9 @@ This project evaluates **Lightmatter photonic interconnects** as an emerging tec
 
 The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/final-project/workspace/final_project) and includes:
 
-- an executed exploratory notebook,
+- an executed reproducibility notebook,
 - reusable study code and a CLI,
-- CSV, Markdown, and presentation-ready chart artifacts,
+- raw CSV/Markdown audit artifacts plus a six-figure final submission package,
 - a compiler/dataflow strategy model that shows mapping changes beyond constant-factor link substitutions,
 - distance-parametrized electrical/chiplet/photonic link-energy models,
 - strong- and weak-scaling studies plus OCS/OPS optical switching sensitivity,
@@ -31,9 +31,9 @@ The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/fin
 - Notebook generator: [workspace/final_project/scripts/generate_lightmatter_notebook.py](/home/pranav/6.5930/final-project/workspace/final_project/scripts/generate_lightmatter_notebook.py)
 - Architecture: [workspace/final_project/arch/tpu_lightmatter_cluster.yaml](/home/pranav/6.5930/final-project/workspace/final_project/arch/tpu_lightmatter_cluster.yaml)
 - Workload: [workspace/final_project/workload/single_matmul.yaml](/home/pranav/6.5930/final-project/workspace/final_project/workload/single_matmul.yaml)
-- Condensed presentation package: [workspace/final_project/results/presentation](/home/pranav/6.5930/final-project/workspace/final_project/results/presentation)
+- Canonical final submission package: [workspace/final_project/results/presentation](/home/pranav/6.5930/final-project/workspace/final_project/results/presentation)
 
-The main notebook is regenerated from code and fully executed as part of validation. The test suite covers the network model, AccelForge smoke paths, generated artifacts, notebook structure, distance physics, strong/weak scaling, OCS/OPS sensitivity, and superpod workflows.
+The main notebook is regenerated from code and fully executed as part of validation. The final report, poster, summary, and deck use the curated six-figure package in `results/presentation`; the parent `results/` directory remains the raw reproducibility trail. The test suite covers the network model, AccelForge smoke paths, generated artifacts, notebook structure, distance physics, strong/weak scaling, OCS/OPS sensitivity, and superpod workflows.
 
 ## Added Studies
 

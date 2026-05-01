@@ -13,14 +13,14 @@ AccelForge's iterative hardware mapper.
 | `paper.tex` / `paper.pdf` | **Self-contained IEEE report** — background, related work, model, experiments, results, limitations, and required usage disclosure. |
 | `technical_summary.tex` / `technical_summary.pdf` | **One-page technical summary** — project facts, contributions, key insights, reproducibility, and threats to validity. |
 | `poster.tex` / `poster.pdf` | **Poster deliverable** — title, group members, motivation, underlying principles, evaluation, results/analysis, and references. |
-| `presentation.tex` / `presentation.pdf` | **Self-contained presentation** — slide deck plus discussion notes and replication map. |
-| `lightmatter_interconnects.ipynb` | **Main executed notebook** — all 3 milestones + TPU cube ICI study + mapping-choice analysis + compiler/dataflow strategies + scaling laws + chiplet baseline + distance physics + strong/weak scaling + OCS/OPS + full-superpod Gemma/Gemini study. |
+| `presentation.tex` / `presentation.pdf` | **Self-contained presentation** — a concise 17-slide defense with equations, assumptions, results, limitations, and replication map. |
+| `lightmatter_interconnects.ipynb` | **Main executed notebook** — reproducible supporting notebook for the final evidence chain, including the three milestones, TPU cube study, compiler/dataflow choices, distance physics, strong/weak scaling, OCS/OPS, and full-superpod Gemma/Gemini study. |
 | `scripts/lightmatter_interconnects.py` | Core study engine: topology models, iterative solver, mapping signatures, TPU cube mapping study, compiler/dataflow study, scaling laws, distance-parametrized energy model, full-superpod model, technology catalog, sweep functions, CLI. |
 | `scripts/generate_lightmatter_notebook.py` | Programmatic notebook generator. |
 | `tests/test_lightmatter_project.py` | Regression suite covering pure network logic, AccelForge smoke paths, generated artifacts, notebook structure, distance physics, strong/weak scaling, OCS/OPS, and superpod workflows. |
 | `arch/tpu_lightmatter_cluster.yaml` | AccelForge architecture: 2D/3D logical cluster memory + node array + HBM + UB + MAC. |
 | `workload/single_matmul.yaml` | Parameterized GEMM workload template (M, K, N, bits). |
-| `results/presentation/` | Concise final-report package: executive summary, topology diagram, and twelve condensed plots. |
+| `results/presentation/` | **Canonical final submission package:** six figures plus compact assumption, result, and evidence-chain tables. |
 
 ## Course Concept Map
 
@@ -85,13 +85,27 @@ The project no longer treats all interconnects as flat pJ/bit constants. Electri
 
 The project now models public Gemma 4 open-model proxies and Gemini 3/3.1-class stress proxies on a full 9216-chip Ironwood/TPU7x pod. Gemma 4 is grounded in public size/context facts, while Gemini proxy workloads are explicit stress cases because Google does not publish Gemini 3/3.1 parameter counts. The M1000 full photonic compiler stack reaches 42.43x modeled inference latency speedup for the Gemma 4 26B MoE proxy and 14.50x for the longer-context Gemini stress proxy. Training improves less: 3.37x on Gemma 4 MoE and 1.43x on the larger stress proxy, showing the key distinction that inference remains network/cache/expert-routing sensitive while larger training phases become compute dominated once collectives are reduced.
 
-## Generated Outputs (results/)
+## Generated Outputs
+
+The final deliverables use only the curated package in `results/presentation/`:
+
+```
+final_assumptions.csv      — compact model assumptions table
+final_results.csv          — headline quantitative claims
+final_evidence_chain.csv   — one-row-per-experiment narrative map
+01_evidence_chain.png      — final experiment spine
+02_distance_and_scaling.png — distance physics + strong/weak scaling
+03_mapping_and_schedule.png — AccelForge mapping vs distributed schedule
+04_multicast_and_chiplet.png — multicast and advanced chiplet baseline
+05_superpod_end_to_end.png — 9216-chip Gemma/Gemini speedups + bottlenecks
+06_switching_and_limits.png — OCS/OPS sensitivity + model scope
+```
+
+The parent `results/` directory remains the audit trail backing those figures:
 
 ```
 cluster_study.csv          — 3 workloads × 3 scenarios × 2 topologies
 cluster_improvements.csv   — optical vs. mesh reduction per case
-extended_cluster_study.csv — all 6 workloads × 3 scenarios
-node_scaling.csv           — improvement vs. node count (2–128)
 tpu_cube_case_study.csv    — 5 variants × 3 traffic cases
 tpu_improvements.csv       — % reductions vs. electrical torus baseline
 tpu_mapping_study.csv      — AccelForge fixed-point 4×4×4 TPU-cube remapping study
@@ -109,13 +123,8 @@ distance_energy_model.csv    — conversion plus distance-dependent transmission
 strong_weak_scaling.csv      — strong/weak scaling on Gemma/Gemini superpod proxies
 optical_switching.csv        — OCS vs OPS switching sensitivity
 unified_thesis.csv           — compact evidence chain tying all project layers together
-inference_*                 — inference-only superpod workflow artifacts
-training_*                  — training-only superpod workflow artifacts
-superpod_*                  — combined training/inference superpod workflow artifacts
-presentation/              — concise executive summary + 12 chart/diagram assets
 sources.csv                — research bibliography
 summary.md                 — highlights report
-*.png                      — all plots (tech_catalog, convergence, heatmap, ...)
 ```
 
 ## Workflow
@@ -157,7 +166,7 @@ All targets run inside the AccelForge Docker container (`timeloopaccelergy/accel
 | TPU cube ICI study | `tpu_cube_case_study`, `tpu_improvement_frame`, `tpu_cube_mapping_study`, notebook §TPU Cube |
 | Mapping-choice analysis | `optimal_distributed_mapping_frame`, `mapping_signature`, `mapping_features_frame`, notebook §TPU Cube Mapping Adaptation |
 | Compiler/dataflow adaptation | `compiler_strategy_study`, `optimal_compiler_strategy_frame`, notebook §Compiler/Dataflow |
-| Extended: sensitivity + scaling | `bandwidth_sensitivity_network`, `energy_per_bit_sensitivity_network`, `scaling_law_study`, notebook §Sensitivity and §Scaling Laws |
+| Extended: distance + scaling | `distance_energy_model_frame`, `strong_weak_superpod_scaling_study`, `optical_switching_study`, notebook §Unified End-to-End Scaling |
 | Stronger advanced-packaging baseline | `ADVANCED_CHIPLET_3P5T`, `chiplet_comparison_frame`, notebook §Advanced Chiplet Baseline |
 | Full-superpod Gemini-class study | `superpod_stage_study`, `superpod_end_to_end_summary`, `superpod_ablation_frame`, notebook §Full Superpod |
 | Unified distance/scaling/switching study | `distance_energy_model_frame`, `strong_weak_superpod_scaling_study`, `optical_switching_study`, `unified_thesis_frame`, notebook §Unified End-to-End Scaling |

@@ -1,0 +1,7 @@
+category,assumption,value,role
+Baseline TPU pod,Ironwood/TPU7x superpod,"9216 chips, 192 GiB HBM/chip, 1200 GB/s bidirectional ICI/chip",Defines the full-system scale for Gemma/Gemini proxy workloads.
+Photonic reference,Lightmatter M1000,"57.3 Tb/s one-way, 2.3 pJ/bit including laser, multicast-capable OCS",Main proposed interconnect for pod-scale results.
+Electrical link model,conversion + distance,0.2 pJ/bit conversion + 1.96 pJ/bit/mm transmission,Makes electrical energy grow with physical path length.
+Photonic link model,conversion-dominated,M1000 2.3 pJ/bit conversion + 5e-5 pJ/bit/mm transmission,Makes photonic energy nearly independent of distance.
+Mapper integration,LogicalClusterMemory feedback,mapper -> logical-memory traffic -> topology cost -> rerun,Keeps the core study grounded in AccelForge instead of only analytics.
+Compiler/dataflow layer,XLA/GSPMD-like schedule choices,"SPMD collectives, remote pooled HBM, replicated cache, photonic multicast cache",Explains why distributed schedules can change even when inner mappings do not.

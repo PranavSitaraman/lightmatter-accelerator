@@ -4282,6 +4282,374 @@ def write_presentation_assets(
     return paths
 
 
+def write_final_story_assets(
+    output_dir: str | Path,
+    cluster_improvement_df: pd.DataFrame,
+    tpu_improvement_df: pd.DataFrame,
+    tpu_mapping_df: pd.DataFrame,
+    optimal_mapping_df: pd.DataFrame,
+    optimal_compiler_df: pd.DataFrame,
+    chiplet_df: pd.DataFrame,
+    superpod_stage_df: pd.DataFrame,
+    superpod_summary_df: pd.DataFrame,
+    distance_df: pd.DataFrame,
+    strong_weak_df: pd.DataFrame,
+    switching_df: pd.DataFrame,
+    unified_df: pd.DataFrame,
+) -> dict[str, Path]:
+    """
+    Write the final submission-facing evidence package.
+
+    The broader CSV artifacts remain the reproducibility trail. This directory
+    is deliberately small: every figure has a role in the final narrative and
+    each table is compact enough to paste into the report or poster.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    import textwrap
+
+    output_dir = Path(output_dir)
+    final_dir = output_dir / "presentation"
+    final_dir.mkdir(parents=True, exist_ok=True)
+    for stale in final_dir.iterdir():
+        if stale.is_file():
+            stale.unlink()
+
+    paths: dict[str, Path] = {
+        "presentation_index": final_dir / "index.md",
+        "final_assumptions": final_dir / "final_assumptions.csv",
+        "final_results": final_dir / "final_results.csv",
+        "final_evidence_chain": final_dir / "final_evidence_chain.csv",
+        "figure_evidence_chain": final_dir / "01_evidence_chain.png",
+        "figure_distance_scaling": final_dir / "02_distance_and_scaling.png",
+        "figure_mapping_schedule": final_dir / "03_mapping_and_schedule.png",
+        "figure_multicast_chiplet": final_dir / "04_multicast_and_chiplet.png",
+        "figure_superpod": final_dir / "05_superpod_end_to_end.png",
+        "figure_switching_limits": final_dir / "06_switching_and_limits.png",
+    }
+
+    assumptions = pd.DataFrame([
+        {
+            "category": "Baseline TPU pod",
+            "assumption": "Ironwood/TPU7x superpod",
+            "value": "9216 chips, 192 GiB HBM/chip, 1200 GB/s bidirectional ICI/chip",
+            "role": "Defines the full-system scale for Gemma/Gemini proxy workloads.",
+        },
+        {
+            "category": "Photonic reference",
+            "assumption": "Lightmatter M1000",
+            "value": "57.3 Tb/s one-way, 2.3 pJ/bit including laser, multicast-capable OCS",
+            "role": "Main proposed interconnect for pod-scale results.",
+        },
+        {
+            "category": "Electrical link model",
+            "assumption": "conversion + distance",
+            "value": "0.2 pJ/bit conversion + 1.96 pJ/bit/mm transmission",
+            "role": "Makes electrical energy grow with physical path length.",
+        },
+        {
+            "category": "Photonic link model",
+            "assumption": "conversion-dominated",
+            "value": "M1000 2.3 pJ/bit conversion + 5e-5 pJ/bit/mm transmission",
+            "role": "Makes photonic energy nearly independent of distance.",
+        },
+        {
+            "category": "Mapper integration",
+            "assumption": "LogicalClusterMemory feedback",
+            "value": "mapper -> logical-memory traffic -> topology cost -> rerun",
+            "role": "Keeps the core study grounded in AccelForge instead of only analytics.",
+        },
+        {
+            "category": "Compiler/dataflow layer",
+            "assumption": "XLA/GSPMD-like schedule choices",
+            "value": "SPMD collectives, remote pooled HBM, replicated cache, photonic multicast cache",
+            "role": "Explains why distributed schedules can change even when inner mappings do not.",
+        },
+    ])
+    assumptions.to_csv(paths["final_assumptions"], index=False)
+
+    results = executive_summary_frame(
+        cluster_improvement_df,
+        tpu_improvement_df,
+        tpu_mapping_df,
+        optimal_mapping_df,
+        optimal_compiler_df,
+        chiplet_df=chiplet_df,
+        superpod_summary_df=superpod_summary_df,
+    )
+    results.to_csv(paths["final_results"], index=False)
+
+    evidence_chain = pd.DataFrame([
+        {
+            "step": 1,
+            "experiment": "16-node AccelForge feedback loop",
+            "question": "Does a logical-memory network level change energy and latency?",
+            "answer": "Yes: optical multicast reduces cluster energy by ~72% and latency by ~98%.",
+        },
+        {
+            "step": 2,
+            "experiment": "Distance-aware link model",
+            "question": "Is pJ/bit constant with scale?",
+            "answer": "No: electrical/chiplet links grow with distance; photonics is conversion dominated.",
+        },
+        {
+            "step": 3,
+            "experiment": "TPU cube mapping and multicast",
+            "question": "Is the gain just bandwidth?",
+            "answer": "No: shared-state multicast collapses N unicasts into one broadcast.",
+        },
+        {
+            "step": 4,
+            "experiment": "Mapping vs distributed schedule",
+            "question": "Can the AccelForge mapping stay stable while compiler choices change?",
+            "answer": "Yes: 0/24 inner signatures change, but 5/16 distributed choices change.",
+        },
+        {
+            "step": 5,
+            "experiment": "Strong/weak scaling and OCS/OPS",
+            "question": "What improves with larger systems and switching semantics?",
+            "answer": "Photonic multicast scales flatter; OPS mainly helps fine-grained phases.",
+        },
+        {
+            "step": 6,
+            "experiment": "9216-chip Gemma/Gemini proxy",
+            "question": "Does the stack matter end to end?",
+            "answer": "Inference improves far more than training because training becomes compute-bound.",
+        },
+    ])
+    evidence_chain.to_csv(paths["final_evidence_chain"], index=False)
+
+    # Figure 1: one-page evidence chain.
+    fig, ax = plt.subplots(figsize=(12, 6.2))
+    ax.axis("off")
+    colors = ["#EDF8FB", "#E5F5E0", "#FFF7BC", "#FEE0D2", "#E0ECF4", "#F2F0F7"]
+    for i, row in enumerate(evidence_chain.itertuples(index=False)):
+        col = i % 3
+        row_idx = i // 3
+        x = 0.05 + col * 0.32
+        y = 0.57 - row_idx * 0.40
+        rect = patches.FancyBboxPatch(
+            (x, y),
+            0.27,
+            0.30,
+            boxstyle="round,pad=0.012",
+            linewidth=1.3,
+            edgecolor="#0B1F3A",
+            facecolor=colors[i],
+        )
+        ax.add_patch(rect)
+        ax.text(x + 0.135, y + 0.245, textwrap.fill(f"{row.step}. {row.experiment}", 28), ha="center", va="center", fontsize=9.0, weight="bold")
+        ax.text(x + 0.135, y + 0.155, textwrap.fill(row.question, 34), ha="center", va="center", fontsize=7.4)
+        ax.text(x + 0.135, y + 0.065, textwrap.fill(row.answer, 36), ha="center", va="center", fontsize=7.2)
+        if i < len(evidence_chain) - 1 and col < 2:
+            ax.annotate("", xy=(x + 0.305, y + 0.15), xytext=(x + 0.27, y + 0.15), arrowprops=dict(arrowstyle="->", lw=1.2))
+    ax.set_title("Final Experimental Spine: One Question Per Layer", fontsize=14, weight="bold")
+    fig.tight_layout()
+    fig.savefig(paths["figure_evidence_chain"], dpi=190, bbox_inches="tight")
+    plt.close(fig)
+
+    # Figure 2: distance physics + strong/weak scaling.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.8))
+    if not distance_df.empty:
+        focus = distance_df[
+            distance_df["architecture"].isin([
+                "electrical torus",
+                "advanced chiplet torus",
+                "M1000 optical circuit switch",
+            ])
+            & distance_df["scenario"].eq("shared_state_multicast")
+        ].copy()
+        for architecture, group in focus.groupby("architecture"):
+            group = group.sort_values("average_distance_mm")
+            ax0.plot(
+                group["average_distance_mm"],
+                group["effective_pJ_per_bit_at_distance"],
+                marker="o",
+                label=humanize_label(architecture),
+            )
+        ax0.set_xscale("log")
+        ax0.set_yscale("log")
+        ax0.set_xlabel("Average path distance (mm)")
+        ax0.set_ylabel("Effective energy (pJ/bit)")
+        ax0.set_title("A. Link Energy Is Distance-Dependent")
+        if not focus.empty:
+            ax0.legend(fontsize=7)
+        ax0.grid(True, which="both", alpha=0.25)
+    if not strong_weak_df.empty:
+        focus = strong_weak_df[
+            strong_weak_df["configuration"].isin([
+                "Ironwood electrical torus + XLA SPMD",
+                "M1000 full photonic compiler stack",
+            ])
+            & strong_weak_df["phase"].eq("inference")
+            & strong_weak_df["model"].str.contains("Gemma 4 26B")
+        ].copy()
+        for (mode, config), group in focus.groupby(["scaling_mode", "configuration"]):
+            group = group.sort_values("active_chip_count")
+            style = "--" if mode == "weak" else "-"
+            label = f"{mode.title()} / {config.split(' + ')[0]}"
+            ax1.plot(group["active_chip_count"], group["latency_per_work_unit_s"], marker="o", linestyle=style, label=label)
+        ax1.set_xscale("log", base=2)
+        ax1.set_yscale("log")
+        ax1.set_xlabel("Active chips")
+        ax1.set_ylabel("Latency per modeled work unit (s)")
+        ax1.set_title("B. Strong and Weak Scaling")
+        ax1.legend(fontsize=7)
+        ax1.grid(True, which="both", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(paths["figure_distance_scaling"], dpi=190, bbox_inches="tight")
+    plt.close(fig)
+
+    # Figure 3: AccelForge mapping invariance vs compiler-visible schedule changes.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.6))
+    photonic_mapping = tpu_mapping_df[tpu_mapping_df["variant"] != "TPU cube electrical torus"]
+    same_count = int((~photonic_mapping["mapping_differs_from_electrical"].astype(bool)).sum()) if not photonic_mapping.empty else 0
+    changed_count = int(photonic_mapping["mapping_differs_from_electrical"].astype(bool).sum()) if not photonic_mapping.empty else 0
+    ax0.bar(["Same inner\nmapping", "Changed inner\nmapping"], [same_count, changed_count], color=["#2B8CBE", "#F03B20"])
+    ax0.set_title("A. AccelForge Inner Mapping")
+    ax0.set_ylabel("Photonic cube cases")
+    ax0.text(0, same_count * 0.5 if same_count else 0.1, f"{same_count}", ha="center", va="center", color="white", weight="bold")
+    ax0.text(1, changed_count + 0.2, f"{changed_count}", ha="center", va="bottom", weight="bold")
+    if not optimal_compiler_df.empty:
+        plot_df = optimal_compiler_df[
+            optimal_compiler_df["strategy_changed_vs_baseline"].astype(bool)
+        ].sort_values("energy_gain_vs_baseline_strategy_pct", ascending=False).head(6)
+        labels = [
+            f"{humanize_label(w)}\n{humanize_label(s)}"
+            for w, s in zip(plot_df["workload"], plot_df["strategy_label"])
+        ]
+        ax1.bar(labels, plot_df["energy_gain_vs_baseline_strategy_pct"], color="#31A354")
+        ax1.set_title("B. Compiler/Dataflow Schedule")
+        ax1.set_ylabel("Energy gain vs baseline strategy (%)")
+        ax1.tick_params(axis="x", rotation=30, labelsize=7)
+    fig.tight_layout()
+    fig.savefig(paths["figure_mapping_schedule"], dpi=190, bbox_inches="tight")
+    plt.close(fig)
+
+    # Figure 4: multicast and chiplet baseline.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.8))
+    if not tpu_improvement_df.empty:
+        focus = tpu_improvement_df[
+            tpu_improvement_df["case"].isin(["all_to_all_activation", "shared_weight_multicast"])
+        ].copy()
+        focus["label"] = focus["variant"].str.replace("Photonic ", "", regex=False) + "\n" + focus["case"].str.replace("_", " ", regex=False)
+        focus = focus.sort_values("energy_reduction_pct", ascending=False).head(8)
+        ax0.bar(focus["label"], focus["energy_reduction_pct"], color="#2B8CBE")
+        ax0.set_title("A. Cube Network: Multicast Changes the Regime")
+        ax0.set_ylabel("Energy reduction vs electrical torus (%)")
+        ax0.tick_params(axis="x", rotation=35, labelsize=7)
+    if not chiplet_df.empty:
+        focus = chiplet_df[
+            (chiplet_df["architecture"] != "Advanced chiplet torus")
+            & chiplet_df["scenario"].eq("shared_state_multicast")
+        ].copy()
+        ax1.bar(focus["architecture"], focus["energy_reduction_vs_chiplet_pct"], color="#756BB1")
+        ax1.set_title("B. Against 3.5 Tb/s, 6 pJ/bit Chiplet")
+        ax1.set_ylabel("Energy reduction (%)")
+        ax1.tick_params(axis="x", rotation=25, labelsize=7)
+    fig.tight_layout()
+    fig.savefig(paths["figure_multicast_chiplet"], dpi=190, bbox_inches="tight")
+    plt.close(fig)
+
+    # Figure 5: superpod speedups and remaining bottlenecks.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.8))
+    if not superpod_summary_df.empty:
+        focus = superpod_summary_df[
+            superpod_summary_df["configuration"].eq("M1000 full photonic compiler stack")
+            & superpod_summary_df["model"].isin([
+                "Gemma 4 26B MoE proxy",
+                "Gemini 3 Deep Think long-context proxy",
+            ])
+        ].copy()
+        focus["label"] = focus["model"].str.replace(" proxy", "", regex=False) + "\n" + focus["phase"].str.title()
+        ax0.bar(focus["label"], focus["speedup_vs_baseline"], color=["#2B8CBE" if p == "inference" else "#31A354" for p in focus["phase"]])
+        ax0.axhline(1, color="black", linewidth=0.8)
+        ax0.set_title("A. 9216-Chip End-to-End Speedup")
+        ax0.set_ylabel("Latency speedup vs electrical")
+        ax0.tick_params(axis="x", rotation=25, labelsize=7)
+    if not superpod_stage_df.empty:
+        focus = superpod_stage_df[
+            superpod_stage_df["configuration"].eq("M1000 full photonic compiler stack")
+            & superpod_stage_df["model"].eq("Gemma 4 26B MoE proxy")
+        ].copy()
+        stage = focus.groupby("phase")[["compute_latency_s", "hbm_latency_s", "exposed_network_latency_s"]].sum()
+        bottom = None
+        colors = ["#9ECAE1", "#A1D99B", "#FC9272"]
+        for idx, col in enumerate(["compute_latency_s", "hbm_latency_s", "exposed_network_latency_s"]):
+            vals = stage[col]
+            ax1.bar(stage.index, vals, bottom=bottom, label=col.replace("_latency_s", "").replace("_", " "), color=colors[idx])
+            bottom = vals if bottom is None else bottom + vals
+        ax1.set_title("B. Remaining Bottleneck After Photonics")
+        ax1.set_ylabel("Latency contribution (s)")
+        ax1.legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(paths["figure_superpod"], dpi=190, bbox_inches="tight")
+    plt.close(fig)
+
+    # Figure 6: OCS/OPS sensitivity and scope of the model.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.8))
+    if not switching_df.empty:
+        focus = switching_df[
+            switching_df["model"].eq("Gemma 4 26B MoE proxy")
+            & switching_df["phase"].eq("inference")
+        ].copy()
+        ax0.bar(focus["switching_family"], focus["speedup_vs_baseline"], color=["#9ECAE1", "#31A354", "#756BB1"][: len(focus)])
+        ax0.axhline(1, color="black", linewidth=0.8)
+        ax0.set_title("A. M1000 Switching Sensitivity")
+        ax0.set_ylabel("Speedup vs electrical baseline")
+        ax0.tick_params(axis="x", rotation=25, labelsize=8)
+    included = ["AccelForge actions", "HBM", "distance energy", "hop contention", "multicast", "stage overlap"]
+    excluded = ["packet queues", "thermal drift", "laser aging", "XLA codegen", "area cost", "model accuracy"]
+    ax1.axis("off")
+    ax1.text(0.03, 0.93, "B. Scope: what the model does and does not claim", fontsize=11, weight="bold")
+    ax1.text(0.05, 0.78, "Included", fontsize=10, weight="bold", color="#238B45")
+    ax1.text(0.55, 0.78, "Excluded / future work", fontsize=10, weight="bold", color="#CB181D")
+    for i, item in enumerate(included):
+        ax1.text(0.05, 0.68 - i * 0.09, f"• {item}", fontsize=9)
+    for i, item in enumerate(excluded):
+        ax1.text(0.55, 0.68 - i * 0.09, f"• {item}", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(paths["figure_switching_limits"], dpi=190, bbox_inches="tight")
+    plt.close(fig)
+
+    index_lines = [
+        "# Final Submission Evidence Package",
+        "",
+        "This folder intentionally contains the small set of assets used by the final report, poster, technical summary, and presentation.",
+        "Raw CSVs in the parent `results/` directory remain the reproducibility trail.",
+        "",
+        "## Storyline",
+        "",
+    ]
+    for row in evidence_chain.itertuples(index=False):
+        index_lines.append(f"{row.step}. **{row.experiment}.** {row.question} {row.answer}")
+    index_lines.extend([
+        "",
+        "## Files",
+        "",
+        "- `final_assumptions.csv`: compact table of model constants and assumptions.",
+        "- `final_results.csv`: headline metrics used in the submission.",
+        "- `final_evidence_chain.csv`: one-row-per-experiment narrative map.",
+        "- `01_evidence_chain.png`: the full experiment spine.",
+        "- `02_distance_and_scaling.png`: distance physics plus strong/weak scaling.",
+        "- `03_mapping_and_schedule.png`: why AccelForge mappings can stay stable while compiler schedules change.",
+        "- `04_multicast_and_chiplet.png`: multicast and advanced-packaging comparison.",
+        "- `05_superpod_end_to_end.png`: Gemma/Gemini full-superpod speedups and bottlenecks.",
+        "- `06_switching_and_limits.png`: OCS/OPS sensitivity and model scope.",
+        "",
+        "## Class Concept Translation",
+        "",
+        "- **Einsum:** each LLM stage is represented by a parameterized GEMM proxy.",
+        "- **Mapping/dataflow:** AccelForge chooses storage, temporal, spatial, and compute loop structure.",
+        "- **Dataplacement:** the logical-memory residency of a tensor determines whether it becomes remote traffic.",
+        "- **Memory hierarchy:** `LogicalClusterMemory` sits above per-chip HBM/UB/register/MAC.",
+        "- **Data movement:** mapper action counts become bits and are priced by topology distance, contention, and multicast semantics.",
+        "- **Emerging technology:** photonics is evaluated through energy, latency, topology, scaling, and compiler-visible scheduling.",
+    ])
+    paths["presentation_index"].write_text("\n".join(index_lines) + "\n")
+    return paths
+
+
 # ---------------------------------------------------------------------------
 # Output writer
 # ---------------------------------------------------------------------------
@@ -4413,20 +4781,16 @@ def write_study_outputs(
     paths["summary"].write_text(summary_md)
     if include_presentation_assets:
         paths.update(
-            write_presentation_assets(
+            write_final_story_assets(
                 output_dir,
                 cluster_improvements,
                 tpu_improvements,
                 tpu_mapping_df,
                 optimal_mapping_df,
                 optimal_compiler_df,
-                scaling_df,
-                scaling_exponents_df,
                 chiplet_df,
                 superpod_stage_df,
                 superpod_summary_df,
-                superpod_ablation_df,
-                superpod_context_df,
                 distance_df,
                 strong_weak_df,
                 switching_df,

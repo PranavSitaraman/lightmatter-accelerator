@@ -841,7 +841,6 @@ class TestArtifactWriter(unittest.TestCase):
             self.assertFalse(summary.empty)
             presentation_index = Path(paths["presentation_index"]).read_text()
             self.assertTrue(Path(paths["presentation_index"]).exists())
-            self.assertTrue(Path(paths["executive_summary"]).exists())
             self.assertTrue(Path(paths["optimal_mapping_choices"]).exists())
             self.assertTrue(Path(paths["superpod_end_to_end_summary"]).exists())
             self.assertTrue(Path(paths["superpod_context_scaling"]).exists())
@@ -849,9 +848,21 @@ class TestArtifactWriter(unittest.TestCase):
             self.assertTrue(Path(paths["strong_weak_scaling"]).exists())
             self.assertTrue(Path(paths["optical_switching"]).exists())
             self.assertTrue(Path(paths["unified_thesis"]).exists())
-            self.assertIn("Modeling Notes", presentation_index)
-            self.assertIn("TPU-Speak Translation", presentation_index)
-            self.assertIn("distance-parametrized", presentation_index)
+            self.assertTrue(Path(paths["final_assumptions"]).exists())
+            self.assertTrue(Path(paths["final_results"]).exists())
+            self.assertTrue(Path(paths["final_evidence_chain"]).exists())
+            for figure_key in (
+                "figure_evidence_chain",
+                "figure_distance_scaling",
+                "figure_mapping_schedule",
+                "figure_multicast_chiplet",
+                "figure_superpod",
+                "figure_switching_limits",
+            ):
+                self.assertTrue(Path(paths[figure_key]).exists(), figure_key)
+            self.assertIn("Final Submission Evidence Package", presentation_index)
+            self.assertIn("Class Concept Translation", presentation_index)
+            self.assertIn("distance physics", presentation_index.lower())
 
     def test_optimal_distributed_mapping_frame_detects_candidate_choices(self):
         df = pd.DataFrame([
