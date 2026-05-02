@@ -19,16 +19,21 @@ Raw CSVs in the parent `results/` directory remain the reproducibility trail.
 - `final_evidence_chain.csv`: one-row-per-experiment narrative map.
 - `01_evidence_chain.png`: the full experiment spine.
 - `02_distance_and_scaling.png`: distance physics plus strong/weak scaling.
-- `03_mapping_and_schedule.png`: why AccelForge mappings can stay stable while compiler schedules change.
+- `03_mapping_and_schedule.png`: inner-mapping invariance vs. distributed-schedule changes.
 - `04_multicast_and_chiplet.png`: multicast and advanced-packaging comparison.
-- `05_superpod_end_to_end.png`: Gemma/Gemini full-superpod speedups and bottlenecks.
-- `06_switching_and_limits.png`: OCS/OPS sensitivity and model scope.
+- `05_superpod_end_to_end.png`: full-superpod speedups and bottleneck shares.
+- `06_switching_and_limits.png`: switching-mode sensitivity and residual bottlenecks.
+- `07_cluster_workload_heatmap.png`: 16-node energy/latency reduction heatmap.
+- `08_technology_catalog.png`: per-link bandwidth and energy across the link technologies.
+- `09_convergence_traces.png`: iterative network-aware feedback loop convergence.
+- `10_node_count_scaling.png`: how the photonic advantage scales with node count.
+- `node_scaling_sweep.csv`: numerical data for the node-scaling figure.
 
 ## Class Concept Translation
 
-- **Einsum:** each LLM stage is represented by a parameterized GEMM proxy.
-- **Mapping/dataflow:** AccelForge chooses storage, temporal, spatial, and compute loop structure.
-- **Dataplacement:** the logical-memory residency of a tensor determines whether it becomes remote traffic.
-- **Memory hierarchy:** `LogicalClusterMemory` sits above per-chip HBM/UB/register/MAC.
-- **Data movement:** mapper action counts become bits and are priced by topology distance, contention, and multicast semantics.
-- **Emerging technology:** photonics is evaluated through energy, latency, topology, scaling, and compiler-visible scheduling.
+- **Einsum.** Each LLM stage is represented as a parameterized GEMM proxy.
+- **Mapping and dataflow.** Loop order, tile shape, and tensor residency are chosen at the per-chip level.
+- **Dataplacement.** The logical cluster-memory residency of each tensor determines whether it becomes remote traffic.
+- **Memory hierarchy.** A logical cluster-memory level sits above per-chip HBM, unified buffer, register, and compute units.
+- **Data movement.** Mapper action counts are converted to bits and priced by topology distance, contention, and multicast semantics.
+- **Emerging technology.** Photonics is evaluated through energy, latency, topology, scaling, and compiler-visible scheduling.

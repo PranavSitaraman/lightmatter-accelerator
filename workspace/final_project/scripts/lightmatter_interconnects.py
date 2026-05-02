@@ -4306,6 +4306,7 @@ def write_final_story_assets(
     """
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
+    import numpy as np
     import textwrap
 
     output_dir = Path(output_dir)
@@ -4326,6 +4327,10 @@ def write_final_story_assets(
         "figure_multicast_chiplet": final_dir / "04_multicast_and_chiplet.png",
         "figure_superpod": final_dir / "05_superpod_end_to_end.png",
         "figure_switching_limits": final_dir / "06_switching_and_limits.png",
+        "figure_cluster_heatmap": final_dir / "07_cluster_workload_heatmap.png",
+        "figure_tech_catalog": final_dir / "08_technology_catalog.png",
+        "figure_convergence": final_dir / "09_convergence_traces.png",
+        "figure_node_scaling": final_dir / "10_node_count_scaling.png",
     }
 
     assumptions = pd.DataFrame([
@@ -4419,197 +4424,727 @@ def write_final_story_assets(
     ])
     evidence_chain.to_csv(paths["final_evidence_chain"], index=False)
 
-    # Figure 1: one-page evidence chain.
-    fig, ax = plt.subplots(figsize=(12, 6.2))
+    # Adopt large fonts globally so deliverable figures are readable when scaled.
+    plt.rcParams.update({
+        "font.size": 13,
+        "axes.titlesize": 15,
+        "axes.labelsize": 13,
+        "legend.fontsize": 11,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+    })
+
+    # Figure 1: experiment spine. Larger, well-spaced cards with arrows.
+    fig, ax = plt.subplots(figsize=(15, 7.5))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
     ax.axis("off")
-    colors = ["#EDF8FB", "#E5F5E0", "#FFF7BC", "#FEE0D2", "#E0ECF4", "#F2F0F7"]
+    card_colors = ["#EDF8FB", "#E5F5E0", "#FFF7BC", "#FEE0D2", "#E0ECF4", "#F2F0F7"]
     for i, row in enumerate(evidence_chain.itertuples(index=False)):
         col = i % 3
         row_idx = i // 3
-        x = 0.05 + col * 0.32
-        y = 0.57 - row_idx * 0.40
+        x = 0.04 + col * 0.32
+        y = 0.55 - row_idx * 0.45
         rect = patches.FancyBboxPatch(
             (x, y),
-            0.27,
-            0.30,
-            boxstyle="round,pad=0.012",
-            linewidth=1.3,
+            0.28,
+            0.36,
+            boxstyle="round,pad=0.015",
+            linewidth=1.6,
             edgecolor="#0B1F3A",
-            facecolor=colors[i],
+            facecolor=card_colors[i],
         )
         ax.add_patch(rect)
-        ax.text(x + 0.135, y + 0.245, textwrap.fill(f"{row.step}. {row.experiment}", 28), ha="center", va="center", fontsize=9.0, weight="bold")
-        ax.text(x + 0.135, y + 0.155, textwrap.fill(row.question, 34), ha="center", va="center", fontsize=7.4)
-        ax.text(x + 0.135, y + 0.065, textwrap.fill(row.answer, 36), ha="center", va="center", fontsize=7.2)
+        ax.text(x + 0.14, y + 0.30, textwrap.fill(f"{row.step}. {row.experiment}", 26),
+                ha="center", va="center", fontsize=12.5, weight="bold")
+        ax.text(x + 0.14, y + 0.20, textwrap.fill("Q: " + row.question, 32),
+                ha="center", va="center", fontsize=10.5, color="#1F2937")
+        ax.text(x + 0.14, y + 0.075, textwrap.fill("A: " + row.answer, 34),
+                ha="center", va="center", fontsize=10.0, color="#0B5394", style="italic")
         if i < len(evidence_chain) - 1 and col < 2:
-            ax.annotate("", xy=(x + 0.305, y + 0.15), xytext=(x + 0.27, y + 0.15), arrowprops=dict(arrowstyle="->", lw=1.2))
-    ax.set_title("Final Experimental Spine: One Question Per Layer", fontsize=14, weight="bold")
+            ax.annotate("", xy=(x + 0.32, y + 0.18), xytext=(x + 0.28, y + 0.18),
+                        arrowprops=dict(arrowstyle="->", lw=1.8, color="#0B1F3A"))
+    ax.text(0.5, 0.97, "Six experiments, one question each, in the order they were run",
+            ha="center", va="top", fontsize=15, weight="bold")
     fig.tight_layout()
-    fig.savefig(paths["figure_evidence_chain"], dpi=190, bbox_inches="tight")
+    fig.savefig(paths["figure_evidence_chain"], dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    # Figure 2: distance physics + strong/weak scaling.
-    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.8))
+    # Figure 2: distance physics + strong/weak scaling. Wider, richer line set.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(15, 5.6))
     if not distance_df.empty:
         focus = distance_df[
             distance_df["architecture"].isin([
                 "electrical torus",
                 "advanced chiplet torus",
+                "EVK100 photonic torus",
                 "M1000 optical circuit switch",
             ])
             & distance_df["scenario"].eq("shared_state_multicast")
         ].copy()
-        for architecture, group in focus.groupby("architecture"):
-            group = group.sort_values("average_distance_mm")
+        style_map = {
+            "electrical torus": ("#D62728", "o", "-"),
+            "advanced chiplet torus": ("#FF7F0E", "s", "-"),
+            "EVK100 photonic torus": ("#1F77B4", "^", "--"),
+            "M1000 optical circuit switch": ("#2CA02C", "D", "-"),
+        }
+        for arch_name in ["electrical torus", "advanced chiplet torus",
+                          "EVK100 photonic torus", "M1000 optical circuit switch"]:
+            grp = focus[focus["architecture"] == arch_name].sort_values("average_distance_mm")
+            if grp.empty:
+                continue
+            color, marker, ls = style_map[arch_name]
             ax0.plot(
-                group["average_distance_mm"],
-                group["effective_pJ_per_bit_at_distance"],
-                marker="o",
-                label=humanize_label(architecture),
+                grp["average_distance_mm"],
+                grp["effective_pJ_per_bit_at_distance"],
+                marker=marker, linestyle=ls, color=color, linewidth=2.2,
+                markersize=8,
+                label=humanize_label(arch_name),
             )
+        # Reference electronic-vs-photonic crossover annotation
+        ax0.axhline(2.3, color="gray", linestyle=":", linewidth=1, alpha=0.6)
+        ax0.text(0.02, 2.4, "M1000 floor (2.3 pJ/bit)", fontsize=9, color="gray",
+                 transform=ax0.get_yaxis_transform(), va="bottom")
         ax0.set_xscale("log")
         ax0.set_yscale("log")
         ax0.set_xlabel("Average path distance (mm)")
-        ax0.set_ylabel("Effective energy (pJ/bit)")
-        ax0.set_title("A. Link Energy Is Distance-Dependent")
-        if not focus.empty:
-            ax0.legend(fontsize=7)
-        ax0.grid(True, which="both", alpha=0.25)
+        ax0.set_ylabel("Effective link energy (pJ/bit)")
+        ax0.set_title("(a) Per-bit link energy versus path distance")
+        ax0.legend(fontsize=10, loc="lower right", frameon=True)
+        ax0.grid(True, which="both", alpha=0.3)
     if not strong_weak_df.empty:
-        focus = strong_weak_df[
-            strong_weak_df["configuration"].isin([
-                "Ironwood electrical torus + XLA SPMD",
-                "M1000 full photonic compiler stack",
-            ])
-            & strong_weak_df["phase"].eq("inference")
-            & strong_weak_df["model"].str.contains("Gemma 4 26B")
-        ].copy()
-        for (mode, config), group in focus.groupby(["scaling_mode", "configuration"]):
-            group = group.sort_values("active_chip_count")
-            style = "--" if mode == "weak" else "-"
-            label = f"{mode.title()} / {config.split(' + ')[0]}"
-            ax1.plot(group["active_chip_count"], group["latency_per_work_unit_s"], marker="o", linestyle=style, label=label)
+        configs = [
+            ("Ironwood electrical torus + XLA SPMD", "#D62728"),
+            ("M1000 full photonic compiler stack", "#2CA02C"),
+        ]
+        for (config, color) in configs:
+            for mode, ls in [("strong", "-"), ("weak", "--")]:
+                grp = strong_weak_df[
+                    (strong_weak_df["configuration"] == config)
+                    & (strong_weak_df["scaling_mode"] == mode)
+                    & (strong_weak_df["phase"] == "inference")
+                    & (strong_weak_df["model"].str.contains("Gemma 4 26B"))
+                ].sort_values("active_chip_count")
+                if grp.empty:
+                    continue
+                short_name = config.split(" + ")[0].replace("Ironwood ", "").replace("M1000 ", "")
+                ax1.plot(
+                    grp["active_chip_count"], grp["latency_per_work_unit_s"],
+                    marker="o" if mode == "strong" else "s",
+                    linestyle=ls,
+                    color=color,
+                    linewidth=2.2,
+                    markersize=7,
+                    label=f"{mode.title()}: {config.split(' + ')[0]}",
+                )
         ax1.set_xscale("log", base=2)
         ax1.set_yscale("log")
         ax1.set_xlabel("Active chips")
         ax1.set_ylabel("Latency per modeled work unit (s)")
-        ax1.set_title("B. Strong and Weak Scaling")
-        ax1.legend(fontsize=7)
-        ax1.grid(True, which="both", alpha=0.25)
+        ax1.set_title("(b) Strong vs. weak scaling on Gemma 4 26B inference")
+        ax1.legend(fontsize=9, loc="upper right", frameon=True)
+        ax1.grid(True, which="both", alpha=0.3)
+    fig.suptitle("Distance physics and scaling behavior",
+                 fontsize=16, weight="bold", y=1.02)
     fig.tight_layout()
-    fig.savefig(paths["figure_distance_scaling"], dpi=190, bbox_inches="tight")
+    fig.savefig(paths["figure_distance_scaling"], dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    # Figure 3: AccelForge mapping invariance vs compiler-visible schedule changes.
-    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.6))
-    photonic_mapping = tpu_mapping_df[tpu_mapping_df["variant"] != "TPU cube electrical torus"]
-    same_count = int((~photonic_mapping["mapping_differs_from_electrical"].astype(bool)).sum()) if not photonic_mapping.empty else 0
-    changed_count = int(photonic_mapping["mapping_differs_from_electrical"].astype(bool).sum()) if not photonic_mapping.empty else 0
-    ax0.bar(["Same inner\nmapping", "Changed inner\nmapping"], [same_count, changed_count], color=["#2B8CBE", "#F03B20"])
-    ax0.set_title("A. AccelForge Inner Mapping")
-    ax0.set_ylabel("Photonic cube cases")
-    ax0.text(0, same_count * 0.5 if same_count else 0.1, f"{same_count}", ha="center", va="center", color="white", weight="bold")
-    ax0.text(1, changed_count + 0.2, f"{changed_count}", ha="center", va="bottom", weight="bold")
+    # Figure 3: mapping invariance (matrix) vs compiler-visible schedule changes.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(15, 5.8),
+                                   gridspec_kw={"width_ratios": [1.0, 1.2]})
+    # Panel (a): per-(workload, technology) inner-mapping change matrix.
+    photonic_mapping = tpu_mapping_df[tpu_mapping_df["variant"] != "TPU cube electrical torus"].copy()
+    if not photonic_mapping.empty:
+        photonic_mapping["mapping_differs"] = photonic_mapping["mapping_differs_from_electrical"].astype(bool).astype(int)
+        # Build a clean (workload, scenario) x variant matrix
+        photonic_mapping["row_label"] = (
+            photonic_mapping["workload"].apply(humanize_label)
+            + " / "
+            + photonic_mapping["scenario"].apply(humanize_label)
+        )
+        photonic_mapping["col_label"] = photonic_mapping["variant"].str.replace("Photonic ", "", regex=False).str.replace("TPU cube ", "", regex=False)
+        matrix = photonic_mapping.pivot_table(
+            index="row_label", columns="col_label",
+            values="mapping_differs", aggfunc="max",
+        ).fillna(0)
+        # Use a soft two-tone palette so the matrix reads cleanly even at
+        # paper-column width. Unchanged cells are pale green; changed cells
+        # are pale red.
+        from matplotlib.colors import ListedColormap
+        cmap = ListedColormap(["#D9F0D3", "#F4C7C3"])  # light green, light red
+        im = ax0.imshow(matrix.values, aspect="auto", cmap=cmap, vmin=0, vmax=1)
+        ax0.set_xticks(range(len(matrix.columns)))
+        ax0.set_xticklabels(matrix.columns, rotation=22, ha="right", fontsize=10)
+        ax0.set_yticks(range(len(matrix.index)))
+        ax0.set_yticklabels(matrix.index, fontsize=10)
+        # Light grid for readability
+        ax0.set_xticks(np.arange(-0.5, matrix.shape[1], 1), minor=True)
+        ax0.set_yticks(np.arange(-0.5, matrix.shape[0], 1), minor=True)
+        ax0.grid(which="minor", color="white", linestyle="-", linewidth=2)
+        ax0.tick_params(which="minor", bottom=False, left=False)
+        for i in range(matrix.shape[0]):
+            for j in range(matrix.shape[1]):
+                v = matrix.values[i, j]
+                ax0.text(j, i, "—" if v == 0 else "★", ha="center", va="center",
+                         fontsize=18, color=("#1B5E20" if v == 0 else "#990000"),
+                         weight="bold")
+        ax0.set_title("(a) Inner mapping signature relative to electrical baseline",
+                      pad=12)
+        # Manual colorbar legend placed below the matrix
+        ax0.text(matrix.shape[1] / 2 - 0.5, matrix.shape[0] + 0.6,
+                 "— unchanged       ★ changed",
+                 ha="center", va="top", fontsize=11, color="#444")
+    # Panel (b): compiler strategy energy gain across all workloads x technologies.
     if not optimal_compiler_df.empty:
-        plot_df = optimal_compiler_df[
-            optimal_compiler_df["strategy_changed_vs_baseline"].astype(bool)
-        ].sort_values("energy_gain_vs_baseline_strategy_pct", ascending=False).head(6)
-        labels = [
-            f"{humanize_label(w)}\n{humanize_label(s)}"
-            for w, s in zip(plot_df["workload"], plot_df["strategy_label"])
-        ]
-        ax1.bar(labels, plot_df["energy_gain_vs_baseline_strategy_pct"], color="#31A354")
-        ax1.set_title("B. Compiler/Dataflow Schedule")
-        ax1.set_ylabel("Energy gain vs baseline strategy (%)")
-        ax1.tick_params(axis="x", rotation=30, labelsize=7)
+        # Build grouped bar: x = workload, color = technology
+        df = optimal_compiler_df.copy()
+        df["short_tech"] = df["technology"].replace({
+            "Lightmatter EVK100": "EVK100",
+            "Lightmatter M1000": "M1000",
+            "Lightmatter M1000 OPS model": "M1000 OPS",
+            "Advanced chiplet 3.5T": "Chiplet 3.5T",
+            "Electrical 800G/dir": "Electrical",
+        })
+        techs_in_order = ["Electrical", "Chiplet 3.5T", "EVK100", "M1000 OPS", "M1000"]
+        techs_present = [t for t in techs_in_order if t in df["short_tech"].values]
+        workloads = sorted(df["workload"].unique(), key=lambda w: humanize_label(w))
+        x = np.arange(len(workloads))
+        bar_w = 0.16
+        colors = {
+            "Electrical": "#D62728",
+            "Chiplet 3.5T": "#FF7F0E",
+            "EVK100": "#1F77B4",
+            "M1000 OPS": "#9467BD",
+            "M1000": "#2CA02C",
+        }
+        for k, tech in enumerate(techs_present):
+            heights = []
+            changed_flags = []
+            for wl in workloads:
+                row = df[(df["workload"] == wl) & (df["short_tech"] == tech)]
+                if row.empty:
+                    heights.append(0.0); changed_flags.append(False); continue
+                heights.append(float(row["energy_gain_vs_baseline_strategy_pct"].iloc[0]))
+                changed_flags.append(bool(row["strategy_changed_vs_baseline"].iloc[0]))
+            offsets = x + (k - (len(techs_present) - 1) / 2) * bar_w
+            bars = ax1.bar(offsets, heights, width=bar_w, color=colors[tech],
+                           edgecolor="black", linewidth=0.5, label=tech)
+            for off, h, ch in zip(offsets, heights, changed_flags):
+                if ch and h > 5:
+                    ax1.text(off, h + 1.2, "★", ha="center", va="bottom", fontsize=11)
+        ax1.set_xticks(x)
+        ax1.set_xticklabels([humanize_label(w) for w in workloads], fontsize=11)
+        ax1.set_ylabel("Energy gain over baseline schedule (%)")
+        ax1.set_title("(b) Distributed-schedule energy gain (★ = strategy changed)",
+                      pad=12)
+        ax1.legend(loc="upper right", fontsize=9, ncol=2, frameon=True)
+        ax1.grid(True, axis="y", alpha=0.3)
+        ax1.set_axisbelow(True)
+        ax1.set_ylim(0, max(80, ax1.get_ylim()[1] * 1.05))
+    fig.suptitle("Local mapping is stable; the distributed schedule is what changes",
+                 fontsize=16, weight="bold", y=1.02)
     fig.tight_layout()
-    fig.savefig(paths["figure_mapping_schedule"], dpi=190, bbox_inches="tight")
+    fig.savefig(paths["figure_mapping_schedule"], dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    # Figure 4: multicast and chiplet baseline.
-    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.8))
+    # Figure 4: absolute energy on log scale across all variants and cases,
+    # plus the chiplet baseline comparison shown as absolute values.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(15, 5.6))
     if not tpu_improvement_df.empty:
-        focus = tpu_improvement_df[
-            tpu_improvement_df["case"].isin(["all_to_all_activation", "shared_weight_multicast"])
-        ].copy()
-        focus["label"] = focus["variant"].str.replace("Photonic ", "", regex=False) + "\n" + focus["case"].str.replace("_", " ", regex=False)
-        focus = focus.sort_values("energy_reduction_pct", ascending=False).head(8)
-        ax0.bar(focus["label"], focus["energy_reduction_pct"], color="#2B8CBE")
-        ax0.set_title("A. Cube Network: Multicast Changes the Regime")
-        ax0.set_ylabel("Energy reduction vs electrical torus (%)")
-        ax0.tick_params(axis="x", rotation=35, labelsize=7)
+        # Build full grid of cases x variants, including the electrical baseline.
+        rows = []
+        for _, r in tpu_improvement_df.iterrows():
+            rows.append({
+                "case": r["case"], "variant": r["variant"],
+                "energy_uJ": float(r["energy_uJ_per_chip"]),
+            })
+            # add baseline reference once per case
+            rows.append({
+                "case": r["case"], "variant": "TPU v5p electrical torus (baseline)",
+                "energy_uJ": float(r["energy_uJ_per_chip_baseline"]),
+            })
+        full = pd.DataFrame(rows).drop_duplicates(["case", "variant"])
+        case_order = ["all_to_all_shard_exchange", "remote_weight_refill", "shared_weight_multicast"]
+        case_present = [c for c in case_order if c in full["case"].values]
+        variant_order = [
+            "TPU v5p electrical torus (baseline)",
+            "Photonic torus (EVK100)",
+            "Photonic switched fabric (L200)",
+            "Photonic switched fabric (L200X)",
+            "Photonic switched fabric (M1000)",
+        ]
+        variant_present = [v for v in variant_order if v in full["variant"].values]
+        x = np.arange(len(case_present))
+        bar_w = 0.15
+        colors = {
+            "TPU v5p electrical torus (baseline)": "#D62728",
+            "Photonic torus (EVK100)": "#1F77B4",
+            "Photonic switched fabric (L200)": "#17A2B8",
+            "Photonic switched fabric (L200X)": "#9467BD",
+            "Photonic switched fabric (M1000)": "#2CA02C",
+        }
+        for k, var in enumerate(variant_present):
+            heights = []
+            for c in case_present:
+                rr = full[(full["case"] == c) & (full["variant"] == var)]
+                heights.append(float(rr["energy_uJ"].iloc[0]) if not rr.empty else 0.0)
+            offsets = x + (k - (len(variant_present) - 1) / 2) * bar_w
+            short_label = (var.replace("Photonic switched fabric ", "Switched ")
+                              .replace("Photonic torus ", "Torus ")
+                              .replace(" (baseline)", ""))
+            ax0.bar(offsets, heights, width=bar_w, color=colors[var],
+                    edgecolor="black", linewidth=0.4, label=short_label)
+        ax0.set_yscale("log")
+        ax0.set_xticks(x)
+        ax0.set_xticklabels([humanize_label(c) for c in case_present], fontsize=11)
+        ax0.set_ylabel("Network energy per chip (µJ, log scale)")
+        ax0.set_title("(a) Absolute energy by traffic case across cube variants")
+        ax0.legend(fontsize=9, loc="upper right", ncol=2, frameon=True)
+        ax0.grid(True, which="both", axis="y", alpha=0.3)
+        ax0.set_axisbelow(True)
+        # Annotate the multicast collapse in the rightmost group.
+        if "shared_weight_multicast" in case_present:
+            idx = case_present.index("shared_weight_multicast")
+            elec_h = float(full[(full["case"] == "shared_weight_multicast")
+                                & (full["variant"] == "TPU v5p electrical torus (baseline)")]["energy_uJ"].iloc[0])
+            ax0.annotate(
+                "shared multicast collapses\n N unicasts to one broadcast",
+                xy=(idx, elec_h * 0.04), xytext=(idx - 0.5, elec_h * 0.2),
+                fontsize=10, ha="center",
+                arrowprops=dict(arrowstyle="->", color="black", lw=1.2),
+            )
+
     if not chiplet_df.empty:
-        focus = chiplet_df[
-            (chiplet_df["architecture"] != "Advanced chiplet torus")
-            & chiplet_df["scenario"].eq("shared_state_multicast")
-        ].copy()
-        ax1.bar(focus["architecture"], focus["energy_reduction_vs_chiplet_pct"], color="#756BB1")
-        ax1.set_title("B. Against 3.5 Tb/s, 6 pJ/bit Chiplet")
-        ax1.set_ylabel("Energy reduction (%)")
-        ax1.tick_params(axis="x", rotation=25, labelsize=7)
+        cdf = chiplet_df[chiplet_df["architecture"] != "Advanced chiplet torus"].copy()
+        scn_order = ["node_to_node", "node_to_dram", "shared_state_multicast"]
+        scn_present = [s for s in scn_order if s in cdf["scenario"].values]
+        archs_present = list(cdf["architecture"].unique())
+        x = np.arange(len(scn_present))
+        bar_w = 0.22
+        chiplet_colors = {
+            "EVK100 photonic torus": "#1F77B4",
+            "M1000 optical switched fabric": "#2CA02C",
+        }
+        for k, arch in enumerate(archs_present):
+            heights = []
+            for scn in scn_present:
+                rr = cdf[(cdf["architecture"] == arch) & (cdf["scenario"] == scn)]
+                heights.append(float(rr["energy_reduction_vs_chiplet_pct"].iloc[0]) if not rr.empty else 0.0)
+            offsets = x + (k - (len(archs_present) - 1) / 2) * bar_w
+            ax1.bar(offsets, heights, width=bar_w, color=chiplet_colors.get(arch, "#999999"),
+                    edgecolor="black", linewidth=0.4, label=arch)
+            for off, h in zip(offsets, heights):
+                ax1.text(off, h + 1.5, f"{h:.1f}%", ha="center", va="bottom", fontsize=9)
+        ax1.set_xticks(x)
+        ax1.set_xticklabels([humanize_label(s) for s in scn_present], fontsize=11)
+        ax1.set_ylabel("Energy reduction vs. 3.5 Tb/s, 6 pJ/bit chiplet (%)")
+        ax1.set_ylim(0, 110)
+        ax1.set_title("(b) Photonic improvement over a deliberately strong chiplet baseline")
+        ax1.legend(fontsize=10, loc="lower right", frameon=True)
+        ax1.grid(True, axis="y", alpha=0.3)
+        ax1.set_axisbelow(True)
+    fig.suptitle("Multicast and topology semantics, not raw bandwidth, are decisive",
+                 fontsize=16, weight="bold", y=1.02)
     fig.tight_layout()
-    fig.savefig(paths["figure_multicast_chiplet"], dpi=190, bbox_inches="tight")
+    fig.savefig(paths["figure_multicast_chiplet"], dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    # Figure 5: superpod speedups and remaining bottlenecks.
-    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.8))
+    # Figure 5: superpod speedups (log scale) + 100%-stacked bottleneck shares.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(15, 5.6))
     if not superpod_summary_df.empty:
         focus = superpod_summary_df[
             superpod_summary_df["configuration"].eq("M1000 full photonic compiler stack")
             & superpod_summary_df["model"].isin([
                 "Gemma 4 26B MoE proxy",
+                "Gemma 4 31B dense proxy",
                 "Gemini 3 Deep Think long-context proxy",
             ])
         ].copy()
-        focus["label"] = focus["model"].str.replace(" proxy", "", regex=False) + "\n" + focus["phase"].str.title()
-        ax0.bar(focus["label"], focus["speedup_vs_baseline"], color=["#2B8CBE" if p == "inference" else "#31A354" for p in focus["phase"]])
-        ax0.axhline(1, color="black", linewidth=0.8)
-        ax0.set_title("A. 9216-Chip End-to-End Speedup")
-        ax0.set_ylabel("Latency speedup vs electrical")
-        ax0.tick_params(axis="x", rotation=25, labelsize=7)
+        focus["short_model"] = focus["model"].replace({
+            "Gemma 4 26B MoE proxy": "Gemma 4 26B MoE",
+            "Gemma 4 31B dense proxy": "Gemma 4 31B dense",
+            "Gemini 3 Deep Think long-context proxy": "Gemini long-context",
+        })
+        models_order = ["Gemma 4 26B MoE", "Gemma 4 31B dense", "Gemini long-context"]
+        models_present = [m for m in models_order if m in focus["short_model"].values]
+        x = np.arange(len(models_present))
+        bar_w = 0.36
+        infer_colors = "#1F77B4"
+        train_colors = "#2CA02C"
+        infer_h, train_h = [], []
+        for m in models_present:
+            inf_row = focus[(focus["short_model"] == m) & (focus["phase"] == "inference")]
+            tr_row = focus[(focus["short_model"] == m) & (focus["phase"] == "training")]
+            infer_h.append(float(inf_row["speedup_vs_baseline"].iloc[0]) if not inf_row.empty else 1.0)
+            train_h.append(float(tr_row["speedup_vs_baseline"].iloc[0]) if not tr_row.empty else 1.0)
+        b1 = ax0.bar(x - bar_w / 2, infer_h, bar_w, color=infer_colors,
+                     edgecolor="black", linewidth=0.4, label="Inference")
+        b2 = ax0.bar(x + bar_w / 2, train_h, bar_w, color=train_colors,
+                     edgecolor="black", linewidth=0.4, label="Training")
+        for bar, h in zip(b1, infer_h):
+            ax0.text(bar.get_x() + bar.get_width() / 2, h * 1.05, f"{h:.1f}×",
+                     ha="center", va="bottom", fontsize=10, weight="bold")
+        for bar, h in zip(b2, train_h):
+            ax0.text(bar.get_x() + bar.get_width() / 2, h * 1.05, f"{h:.1f}×",
+                     ha="center", va="bottom", fontsize=10, weight="bold")
+        ax0.set_yscale("log")
+        ax0.axhline(1, color="black", linewidth=1.0, linestyle="--")
+        ax0.set_xticks(x)
+        ax0.set_xticklabels(models_present, fontsize=11)
+        ax0.set_ylabel("Latency speedup vs. electrical (log scale)")
+        ax0.set_title("(a) End-to-end speedup on a 9216-chip pod")
+        ax0.legend(fontsize=10, loc="upper right", frameon=True)
+        ax0.grid(True, which="both", axis="y", alpha=0.3)
+        ax0.set_axisbelow(True)
     if not superpod_stage_df.empty:
-        focus = superpod_stage_df[
+        # 100%-stacked panel covering both inference and training across both
+        # the electrical baseline and the M1000 photonic stack.
+        configs_to_show = [
+            ("Ironwood electrical torus + XLA SPMD", "Electrical"),
+            ("M1000 full photonic compiler stack", "M1000 photonic"),
+        ]
+        labels, comp_share, hbm_share, net_share = [], [], [], []
+        for cfg, short in configs_to_show:
+            for phase in ["inference", "training"]:
+                slice_ = superpod_stage_df[
+                    superpod_stage_df["configuration"].eq(cfg)
+                    & superpod_stage_df["model"].eq("Gemma 4 26B MoE proxy")
+                    & superpod_stage_df["phase"].eq(phase)
+                ]
+                if slice_.empty:
+                    continue
+                comp = float(slice_["compute_latency_s"].sum())
+                hbm = float(slice_["hbm_latency_s"].sum())
+                net = float(slice_["exposed_network_latency_s"].sum())
+                total = max(comp + hbm + net, 1e-30)
+                labels.append(f"{short}\n{phase.title()}")
+                comp_share.append(100 * comp / total)
+                hbm_share.append(100 * hbm / total)
+                net_share.append(100 * net / total)
+        if labels:
+            x_idx = np.arange(len(labels))
+            ax1.bar(x_idx, comp_share, color="#9ECAE1", edgecolor="black", linewidth=0.4, label="Compute")
+            ax1.bar(x_idx, hbm_share, bottom=comp_share, color="#A1D99B",
+                    edgecolor="black", linewidth=0.4, label="HBM")
+            base = [a + b for a, b in zip(comp_share, hbm_share)]
+            ax1.bar(x_idx, net_share, bottom=base, color="#FC9272",
+                    edgecolor="black", linewidth=0.4, label="Exposed network")
+            for i, (c, h, n) in enumerate(zip(comp_share, hbm_share, net_share)):
+                if c > 5:
+                    ax1.text(i, c / 2, f"{c:.0f}%", ha="center", va="center", fontsize=9)
+                if h > 5:
+                    ax1.text(i, c + h / 2, f"{h:.0f}%", ha="center", va="center", fontsize=9)
+                if n > 5:
+                    ax1.text(i, c + h + n / 2, f"{n:.0f}%", ha="center", va="center", fontsize=9)
+            ax1.set_xticks(x_idx)
+            ax1.set_xticklabels(labels, fontsize=10)
+            ax1.set_ylim(0, 100)
+            ax1.set_ylabel("Latency contribution share (%)")
+            ax1.set_title("(b) What dominates latency before and after photonics")
+            ax1.legend(fontsize=10, loc="lower right", frameon=True)
+            ax1.grid(True, axis="y", alpha=0.3)
+            ax1.set_axisbelow(True)
+    fig.suptitle("Pod-scale impact: inference benefits most; training shifts to a compute ceiling",
+                 fontsize=16, weight="bold", y=1.02)
+    fig.tight_layout()
+    fig.savefig(paths["figure_superpod"], dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+    # Figure 6: switching-mode sensitivity across workloads + traffic-share view.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(15, 5.6))
+    if not switching_df.empty:
+        focus = switching_df[
+            switching_df["model"].isin([
+                "Gemma 4 26B MoE proxy",
+                "Gemma 4 31B dense proxy",
+                "Gemini 3 Deep Think long-context proxy",
+            ])
+        ].copy()
+        focus["short_model"] = focus["model"].replace({
+            "Gemma 4 26B MoE proxy": "Gemma 4 26B MoE",
+            "Gemma 4 31B dense proxy": "Gemma 4 31B dense",
+            "Gemini 3 Deep Think long-context proxy": "Gemini long-context",
+        })
+        models_order = ["Gemma 4 26B MoE", "Gemma 4 31B dense", "Gemini long-context"]
+        models_present = [m for m in models_order if m in focus["short_model"].values]
+        switch_order = []
+        for s in ["OCS topology only", "OCS multicast cache", "OCS full compiler stack",
+                  "OPS fine-grained"]:
+            if s in focus["switching_family"].values:
+                switch_order.append(s)
+        x = np.arange(len(models_present))
+        bar_w = 0.18
+        switch_colors = {
+            "OCS topology only": "#9ECAE1",
+            "OCS multicast cache": "#1F77B4",
+            "OCS full compiler stack": "#2CA02C",
+            "OPS fine-grained": "#9467BD",
+        }
+        for k, sw in enumerate(switch_order):
+            heights = []
+            for m in models_present:
+                rr = focus[
+                    (focus["short_model"] == m) & (focus["switching_family"] == sw)
+                    & (focus["phase"] == "inference")
+                ]
+                heights.append(float(rr["speedup_vs_baseline"].iloc[0]) if not rr.empty else 1.0)
+            offsets = x + (k - (len(switch_order) - 1) / 2) * bar_w
+            bars = ax0.bar(offsets, heights, width=bar_w, color=switch_colors.get(sw, "#999"),
+                           edgecolor="black", linewidth=0.4, label=sw)
+            for off, h in zip(offsets, heights):
+                ax0.text(off, h * 1.02, f"{h:.2f}", ha="center", va="bottom", fontsize=8)
+        ax0.axhline(1, color="black", linewidth=1.0, linestyle="--")
+        ax0.set_xticks(x)
+        ax0.set_xticklabels(models_present, fontsize=11)
+        ax0.set_ylabel("Inference speedup vs. electrical baseline")
+        ax0.set_title("(a) Switching-mode sensitivity across model classes")
+        ax0.legend(fontsize=9, loc="upper left", frameon=True)
+        ax0.grid(True, axis="y", alpha=0.3)
+        ax0.set_axisbelow(True)
+    # Panel (b): network-traffic share by stage for the M1000 photonic stack —
+    # a quantitative view of where photonics actually moves the needle.
+    if not superpod_stage_df.empty:
+        slice_ = superpod_stage_df[
             superpod_stage_df["configuration"].eq("M1000 full photonic compiler stack")
             & superpod_stage_df["model"].eq("Gemma 4 26B MoE proxy")
         ].copy()
-        stage = focus.groupby("phase")[["compute_latency_s", "hbm_latency_s", "exposed_network_latency_s"]].sum()
-        bottom = None
-        colors = ["#9ECAE1", "#A1D99B", "#FC9272"]
-        for idx, col in enumerate(["compute_latency_s", "hbm_latency_s", "exposed_network_latency_s"]):
-            vals = stage[col]
-            ax1.bar(stage.index, vals, bottom=bottom, label=col.replace("_latency_s", "").replace("_", " "), color=colors[idx])
-            bottom = vals if bottom is None else bottom + vals
-        ax1.set_title("B. Remaining Bottleneck After Photonics")
-        ax1.set_ylabel("Latency contribution (s)")
-        ax1.legend(fontsize=7)
+        if not slice_.empty:
+            agg = slice_.groupby(["phase", "stage"]).agg(
+                net_lat_share=("network_latency_share_pct", "mean"),
+                net_eng_share=("network_energy_share_pct", "mean"),
+            ).reset_index()
+            agg["label"] = agg["phase"].str.title() + " / " + agg["stage"].apply(humanize_label)
+            agg = agg.sort_values("net_lat_share", ascending=False).head(8)
+            y_pos = np.arange(len(agg))
+            ax1.barh(y_pos - 0.18, agg["net_lat_share"], height=0.35,
+                     color="#FC9272", edgecolor="black", linewidth=0.4,
+                     label="Network share of latency (%)")
+            ax1.barh(y_pos + 0.18, agg["net_eng_share"], height=0.35,
+                     color="#9ECAE1", edgecolor="black", linewidth=0.4,
+                     label="Network share of energy (%)")
+            for i, (lat, eng) in enumerate(zip(agg["net_lat_share"], agg["net_eng_share"])):
+                ax1.text(lat + 0.5, i - 0.18, f"{lat:.1f}%", va="center", fontsize=9)
+                ax1.text(eng + 0.5, i + 0.18, f"{eng:.1f}%", va="center", fontsize=9)
+            ax1.set_yticks(y_pos)
+            ax1.set_yticklabels(agg["label"], fontsize=10)
+            ax1.invert_yaxis()
+            ax1.set_xlabel("Share of total stage cost (%)")
+            ax1.set_title("(b) Where photonics still leaves residual network share")
+            ax1.legend(fontsize=10, loc="lower right", frameon=True)
+            ax1.grid(True, axis="x", alpha=0.3)
+            ax1.set_axisbelow(True)
+    fig.suptitle("Switching mode and residual bottlenecks after photonics",
+                 fontsize=16, weight="bold", y=1.02)
     fig.tight_layout()
-    fig.savefig(paths["figure_superpod"], dpi=190, bbox_inches="tight")
+    fig.savefig(paths["figure_switching_limits"], dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    # Figure 6: OCS/OPS sensitivity and scope of the model.
-    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12, 4.8))
-    if not switching_df.empty:
-        focus = switching_df[
-            switching_df["model"].eq("Gemma 4 26B MoE proxy")
-            & switching_df["phase"].eq("inference")
-        ].copy()
-        ax0.bar(focus["switching_family"], focus["speedup_vs_baseline"], color=["#9ECAE1", "#31A354", "#756BB1"][: len(focus)])
-        ax0.axhline(1, color="black", linewidth=0.8)
-        ax0.set_title("A. M1000 Switching Sensitivity")
-        ax0.set_ylabel("Speedup vs electrical baseline")
-        ax0.tick_params(axis="x", rotation=25, labelsize=8)
-    included = ["AccelForge actions", "HBM", "distance energy", "hop contention", "multicast", "stage overlap"]
-    excluded = ["packet queues", "thermal drift", "laser aging", "XLA codegen", "area cost", "model accuracy"]
-    ax1.axis("off")
-    ax1.text(0.03, 0.93, "B. Scope: what the model does and does not claim", fontsize=11, weight="bold")
-    ax1.text(0.05, 0.78, "Included", fontsize=10, weight="bold", color="#238B45")
-    ax1.text(0.55, 0.78, "Excluded / future work", fontsize=10, weight="bold", color="#CB181D")
-    for i, item in enumerate(included):
-        ax1.text(0.05, 0.68 - i * 0.09, f"• {item}", fontsize=9)
-    for i, item in enumerate(excluded):
-        ax1.text(0.55, 0.68 - i * 0.09, f"• {item}", fontsize=9)
+    # ---------------------------------------------------------------
+    # Supplementary figure 7 — workload x scenario heatmap (16-node).
+    # ---------------------------------------------------------------
+    if not cluster_improvement_df.empty:
+        cdf = cluster_improvement_df.copy()
+        e_pivot = cdf.pivot_table(
+            index="workload", columns="scenario",
+            values="energy_reduction_pct", aggfunc="mean",
+        )
+        l_pivot = cdf.pivot_table(
+            index="workload", columns="scenario",
+            values="latency_reduction_pct", aggfunc="mean",
+        )
+        fig, (axL, axR) = plt.subplots(1, 2, figsize=(15, 5.5))
+        for ax, pivot, title in [
+            (axL, e_pivot, "(a) Energy reduction (%)"),
+            (axR, l_pivot, "(b) Latency reduction (%)"),
+        ]:
+            im = ax.imshow(pivot.values, aspect="auto", cmap="RdYlGn", vmin=0, vmax=100)
+            ax.set_xticks(range(len(pivot.columns)))
+            ax.set_xticklabels([humanize_label(c) for c in pivot.columns],
+                               rotation=20, ha="right", fontsize=11)
+            ax.set_yticks(range(len(pivot.index)))
+            ax.set_yticklabels([humanize_label(i) for i in pivot.index], fontsize=11)
+            ax.set_title(title, fontsize=14)
+            for i in range(pivot.shape[0]):
+                for j in range(pivot.shape[1]):
+                    v = pivot.values[i, j]
+                    if pd.isna(v):
+                        text = "—"
+                        color = "#666"
+                    elif abs(v) < 0.5:
+                        text = "≈0%"
+                        color = "black"
+                    else:
+                        text = f"{v:.1f}%"
+                        color = "white" if v > 50 else "black"
+                    ax.text(j, i, text, ha="center", va="center",
+                            fontsize=12, color=color, weight="bold")
+            cbar = plt.colorbar(im, ax=ax, fraction=0.045, pad=0.02)
+            cbar.ax.tick_params(labelsize=9)
+        fig.suptitle("Photonic crossbar over electrical mesh: 16-node cluster",
+                     fontsize=16, weight="bold", y=1.02)
+        fig.tight_layout()
+        fig.savefig(paths["figure_cluster_heatmap"], dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+    # ---------------------------------------------------------------
+    # Supplementary figure 8 — technology catalog: BW and pJ/bit bars.
+    # ---------------------------------------------------------------
+    catalog_techs = [
+        ("Electrical 800G", 0.8, 10.0, False),
+        ("Advanced chiplet 3.5T", 3.5, 6.0, False),
+        ("EVK50", LIGHTMATTER_EVK50.link_bandwidth_bps / 1e12, LIGHTMATTER_EVK50.energy_per_bit_j * 1e12, True),
+        ("EVK100", LIGHTMATTER_EVK100.link_bandwidth_bps / 1e12, LIGHTMATTER_EVK100.energy_per_bit_j * 1e12, True),
+        ("L200", LIGHTMATTER_L200.link_bandwidth_bps / 1e12, LIGHTMATTER_L200.energy_per_bit_j * 1e12, True),
+        ("L200X", LIGHTMATTER_L200X.link_bandwidth_bps / 1e12, LIGHTMATTER_L200X.energy_per_bit_j * 1e12, True),
+        ("M1000", LIGHTMATTER_M1000.link_bandwidth_bps / 1e12, LIGHTMATTER_M1000.energy_per_bit_j * 1e12, True),
+    ]
+    tech_names = [t[0] for t in catalog_techs]
+    tech_bw = [t[1] for t in catalog_techs]
+    tech_e = [t[2] for t in catalog_techs]
+    tech_mc = [t[3] for t in catalog_techs]
+    tech_colors = ["#D62728", "#FF7F0E", "#FEC44F", "#1F77B4", "#17A2B8", "#9467BD", "#2CA02C"]
+    fig, (axA, axB) = plt.subplots(1, 2, figsize=(15, 5.4))
+    bars_a = axA.bar(tech_names, tech_bw, color=tech_colors, edgecolor="black", linewidth=0.5)
+    axA.set_yscale("log")
+    axA.set_ylabel("Effective per-link bandwidth (Tb/s, log scale)")
+    axA.set_title("(a) Bandwidth across the modeled link technologies")
+    axA.tick_params(axis="x", rotation=20, labelsize=11)
+    for bar, h in zip(bars_a, tech_bw):
+        axA.text(bar.get_x() + bar.get_width() / 2, h * 1.07, f"{h:.1f}",
+                 ha="center", va="bottom", fontsize=9)
+    axA.grid(True, which="both", axis="y", alpha=0.3)
+    axA.set_axisbelow(True)
+    bars_b = axB.bar(tech_names, tech_e, color=tech_colors, edgecolor="black", linewidth=0.5)
+    axB.set_ylabel("Energy per bit (pJ/bit)")
+    axB.set_title("(b) Per-bit energy and multicast support")
+    axB.tick_params(axis="x", rotation=20, labelsize=11)
+    for bar, h, mc in zip(bars_b, tech_e, tech_mc):
+        marker = "MC" if mc else "—"
+        axB.text(bar.get_x() + bar.get_width() / 2, h + 0.2,
+                 f"{h:.1f} pJ\n{marker}", ha="center", va="bottom", fontsize=9)
+    axB.grid(True, axis="y", alpha=0.3)
+    axB.set_axisbelow(True)
+    fig.suptitle("Technology catalog used in the study",
+                 fontsize=16, weight="bold", y=1.02)
     fig.tight_layout()
-    fig.savefig(paths["figure_switching_limits"], dpi=190, bbox_inches="tight")
+    fig.savefig(paths["figure_tech_catalog"], dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+    # ---------------------------------------------------------------
+    # Supplementary figure 9 — convergence traces for the iterative loop.
+    # ---------------------------------------------------------------
+    # Reconstruct the iteration trajectory from cluster_study columns: we have
+    # baseline (iter 0) and final (iter N) plus first_run+network. Show that
+    # journey for a few illustrative cases.
+    if not cluster_improvement_df.empty:
+        sample_rows = []
+        for _, r in cluster_improvement_df.iterrows():
+            for label, suffix, color in [("Electrical mesh", "_baseline", "#D62728"),
+                                          ("Photonic crossbar", "_proposal", "#2CA02C")]:
+                sample_rows.append({
+                    "workload": r["workload"], "scenario": r["scenario"],
+                    "topology": label, "color": color,
+                    "iter0_uJ": float(r[f"baseline_energy_uJ{suffix}"]),
+                    "iter_first_plus_net_uJ": float(r[f"first_run_plus_network_energy_uJ{suffix}"]),
+                    "iter_final_uJ": float(r[f"final_energy_uJ{suffix}"]),
+                })
+        cdf2 = pd.DataFrame(sample_rows)
+        # Pick three workload/scenario combinations that highlight different behaviors
+        picks = []
+        for ws in [("decode_mlp", "node_to_dram"),
+                   ("kv_attention", "shared_dram_multicast"),
+                   ("prefill_projection", "node_to_node")]:
+            seg = cdf2[(cdf2["workload"] == ws[0]) & (cdf2["scenario"] == ws[1])]
+            if not seg.empty:
+                picks.append((ws[0], ws[1], seg))
+        n_picks = max(1, len(picks))
+        fig, axes = plt.subplots(1, n_picks, figsize=(5.5 * n_picks, 5.0), sharey=False)
+        if n_picks == 1:
+            axes = [axes]
+        for ax, (wl, scn, seg) in zip(axes, picks):
+            for _, row in seg.iterrows():
+                xs = [0, 1, 2]
+                ys = [row["iter0_uJ"], row["iter_first_plus_net_uJ"], row["iter_final_uJ"]]
+                ax.plot(xs, ys, marker="o", linewidth=2.4, markersize=10,
+                        color=row["color"], label=row["topology"])
+            ax.set_xticks([0, 1, 2])
+            ax.set_xticklabels(["Compute only\n(no network)", "First mapper\n+ network",
+                                "Converged\nfeedback"], fontsize=10)
+            ax.set_ylabel("Total energy (µJ)")
+            ax.set_title(f"{humanize_label(wl)}\n{humanize_label(scn)}", fontsize=12)
+            ax.legend(fontsize=9, frameon=True)
+            ax.grid(True, axis="y", alpha=0.3)
+            ax.set_axisbelow(True)
+        fig.suptitle("Iterative convergence: the network-aware feedback loop",
+                     fontsize=16, weight="bold", y=1.02)
+        fig.tight_layout()
+        fig.savefig(paths["figure_convergence"], dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+    # ---------------------------------------------------------------
+    # Supplementary figure 10 — node-count scaling of the photonic gap.
+    # Pure-network (no AccelForge) sweep so we can show many points.
+    # ---------------------------------------------------------------
+    sweep_nodes = [4, 8, 16, 32, 64, 128, 256]
+    GiB_bits = 1024 ** 3 * 8
+    sweep_rows = []
+    for n in sweep_nodes:
+        for scenario_name, comm_pattern in [
+            ("Remote weight refill", "node_to_dram"),
+            ("Shared multicast", "shared_dram_multicast"),
+        ]:
+            scn = Scenario(name=comm_pattern, description="", comm_pattern=comm_pattern,
+                           active_nodes=n)
+            traffic = TrafficBreakdown(weight_read_bits=GiB_bits)
+            mesh_topo = Mesh2DTopology(max(2, int(math.ceil(math.sqrt(n)))),
+                                       max(2, int(math.ceil(math.sqrt(n)))))
+            opt_topo = OpticalCrossbarTopology()
+            mesh_cost = mesh_topo.evaluate(traffic, scn, ELECTRICAL_800G)
+            opt_cost = opt_topo.evaluate(traffic, scn, LIGHTMATTER_M1000)
+            sweep_rows.append({
+                "nodes": n, "scenario": scenario_name,
+                "mesh_uJ": mesh_cost.total_energy_j * 1e6,
+                "opt_uJ": opt_cost.total_energy_j * 1e6,
+                "energy_reduction_pct": 100 * (1 - opt_cost.total_energy_j / max(mesh_cost.total_energy_j, 1e-30)),
+                "mesh_us": mesh_cost.total_latency_s * 1e6,
+                "opt_us": opt_cost.total_latency_s * 1e6,
+                "latency_reduction_pct": 100 * (1 - opt_cost.total_latency_s / max(mesh_cost.total_latency_s, 1e-30)),
+            })
+    sweep_df = pd.DataFrame(sweep_rows)
+    sweep_df.to_csv(final_dir / "node_scaling_sweep.csv", index=False)
+    fig, (axA, axB) = plt.subplots(1, 2, figsize=(15, 5.4))
+    for scn_name, color in [("Remote weight refill", "#1F77B4"),
+                            ("Shared multicast", "#2CA02C")]:
+        seg = sweep_df[sweep_df["scenario"] == scn_name].sort_values("nodes")
+        axA.plot(seg["nodes"], seg["mesh_uJ"], marker="o", linewidth=2.0,
+                 markersize=8, linestyle="-",
+                 color=color, label=f"{scn_name} — electrical mesh")
+        axA.plot(seg["nodes"], seg["opt_uJ"], marker="s", linewidth=2.0,
+                 markersize=8, linestyle="--",
+                 color=color, label=f"{scn_name} — photonic crossbar")
+        axB.plot(seg["nodes"], seg["energy_reduction_pct"], marker="o",
+                 linewidth=2.4, markersize=9, color=color, label=scn_name)
+    axA.set_xscale("log", base=2)
+    axA.set_yscale("log")
+    axA.set_xlabel("Active nodes")
+    axA.set_ylabel("Network energy (µJ, log scale)")
+    axA.set_title("(a) Network energy at 1 GiB traffic per case")
+    axA.legend(fontsize=9, frameon=True)
+    axA.grid(True, which="both", alpha=0.3)
+    axA.set_axisbelow(True)
+    axB.set_xscale("log", base=2)
+    axB.set_xlabel("Active nodes")
+    axB.set_ylabel("Energy reduction over mesh (%)")
+    axB.set_ylim(0, 100)
+    axB.set_title("(b) Photonic advantage compounds with system scale")
+    axB.legend(fontsize=10, frameon=True)
+    axB.grid(True, axis="y", alpha=0.3)
+    axB.set_axisbelow(True)
+    fig.suptitle("Node-count scaling of the photonic advantage",
+                 fontsize=16, weight="bold", y=1.02)
+    fig.tight_layout()
+    fig.savefig(paths["figure_node_scaling"], dpi=200, bbox_inches="tight")
     plt.close(fig)
 
     index_lines = [
@@ -4632,19 +5167,24 @@ def write_final_story_assets(
         "- `final_evidence_chain.csv`: one-row-per-experiment narrative map.",
         "- `01_evidence_chain.png`: the full experiment spine.",
         "- `02_distance_and_scaling.png`: distance physics plus strong/weak scaling.",
-        "- `03_mapping_and_schedule.png`: why AccelForge mappings can stay stable while compiler schedules change.",
+        "- `03_mapping_and_schedule.png`: inner-mapping invariance vs. distributed-schedule changes.",
         "- `04_multicast_and_chiplet.png`: multicast and advanced-packaging comparison.",
-        "- `05_superpod_end_to_end.png`: Gemma/Gemini full-superpod speedups and bottlenecks.",
-        "- `06_switching_and_limits.png`: OCS/OPS sensitivity and model scope.",
+        "- `05_superpod_end_to_end.png`: full-superpod speedups and bottleneck shares.",
+        "- `06_switching_and_limits.png`: switching-mode sensitivity and residual bottlenecks.",
+        "- `07_cluster_workload_heatmap.png`: 16-node energy/latency reduction heatmap.",
+        "- `08_technology_catalog.png`: per-link bandwidth and energy across the link technologies.",
+        "- `09_convergence_traces.png`: iterative network-aware feedback loop convergence.",
+        "- `10_node_count_scaling.png`: how the photonic advantage scales with node count.",
+        "- `node_scaling_sweep.csv`: numerical data for the node-scaling figure.",
         "",
         "## Class Concept Translation",
         "",
-        "- **Einsum:** each LLM stage is represented by a parameterized GEMM proxy.",
-        "- **Mapping/dataflow:** AccelForge chooses storage, temporal, spatial, and compute loop structure.",
-        "- **Dataplacement:** the logical-memory residency of a tensor determines whether it becomes remote traffic.",
-        "- **Memory hierarchy:** `LogicalClusterMemory` sits above per-chip HBM/UB/register/MAC.",
-        "- **Data movement:** mapper action counts become bits and are priced by topology distance, contention, and multicast semantics.",
-        "- **Emerging technology:** photonics is evaluated through energy, latency, topology, scaling, and compiler-visible scheduling.",
+        "- **Einsum.** Each LLM stage is represented as a parameterized GEMM proxy.",
+        "- **Mapping and dataflow.** Loop order, tile shape, and tensor residency are chosen at the per-chip level.",
+        "- **Dataplacement.** The logical cluster-memory residency of each tensor determines whether it becomes remote traffic.",
+        "- **Memory hierarchy.** A logical cluster-memory level sits above per-chip HBM, unified buffer, register, and compute units.",
+        "- **Data movement.** Mapper action counts are converted to bits and priced by topology distance, contention, and multicast semantics.",
+        "- **Emerging technology.** Photonics is evaluated through energy, latency, topology, scaling, and compiler-visible scheduling.",
     ])
     paths["presentation_index"].write_text("\n".join(index_lines) + "\n")
     return paths

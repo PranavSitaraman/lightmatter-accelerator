@@ -8,6 +8,7 @@
 \usepackage{booktabs}
 \usepackage{tabularx}
 \usepackage{array}
+\usepackage{microtype}
 
 \newcommand{\pjbit}{pJ/bit}
 \newcommand{\tbps}{Tb/s}
@@ -27,83 +28,93 @@
 \maketitle
 
 \section{Key Insights and Innovations}
+
 \begin{enumerate}
-\item \textbf{The intra-chip mapping is invariant under photonics; the
-distributed schedule is what changes.} For the 64-chip TPU cube,
-AccelForge converges to the same partitioning, dataflow, and tile
-signature for all seven modeled interconnect technologies (0/24
-inner mappings change). The benefit lives one layer up: 5/16
-workload--scenario pairs flip their optimal communication pattern,
-and switching to remote pooled-HBM streaming on EVK100 removes
-73.86\% of compute energy on KV attention. Reporting these as
-separate layers matches the 6.5930 mapping formalism rather than
-collapsing them into a single ``mapping changed'' number.
-\item \textbf{Hardware multicast and distance-insensitive transport,
-not raw bandwidth, dominate shared-state workloads.} A
-3.5~\tbps{}, 6~\pjbit{} advanced chiplet baseline---chosen
-specifically to defeat the bandwidth hypothesis---is still beaten
-by Lightmatter M1000 by 99.85\% on shared-DRAM multicast: $N$
-unicasts collapse to one logical broadcast and contention
-disappears on a switched fabric. Our distance-parametrized link
-model splits each technology into a conversion term and a per-mm
-transmission term; electrical pJ/bit grows with distance while
-photonic pJ/bit stays flat, and a regression test locks the
-crossover in.
-\item \textbf{Photonics is not a uniform multiplier.} On the
-9216-chip Ironwood-class superpod, the public Gemma~4 26B MoE
-proxy reaches 42.43$\times$ inference latency speedup and 94.05\%
-energy reduction with the full M1000 photonic stack; the larger
-long-context Gemini Deep Think proxy reaches 14.50$\times$.
-Training reaches only 3.37$\times$ and 1.43$\times$ respectively.
-Strong scaling exposes the compute/HBM Amdahl ceiling; weak
-scaling shows where photonic multicast still pays. The strong
-case for photonics is inference and long-context serving, not
-training payoff.
+\item \textbf{The local accelerator mapping is invariant under the photonic
+swap; the distributed schedule is what changes.} On the modeled 64-chip
+torus, the same partitioning, dataflow, and tile signature is selected
+across all seven interconnect technologies we evaluated. Out of 24 cases
+the inner mapping does not change once. The benefit lives one layer up:
+$5$ of $16$ workload and architecture pairs flip the optimal communication
+pattern, and the best alternative schedule (remote pooled-HBM streaming
+on KV attention with EVK100-class photonics) recovers about 73.9\,\% of
+the baseline schedule's energy. We report these as separate columns
+rather than collapsing them into a single ``mapping changed'' headline,
+because the distinction is exactly what the result is about.
+
+\item \textbf{Multicast and distance-insensitive transmission, not raw
+bandwidth, drive the shared-state advantage.} A deliberately strong
+chiplet baseline at 3.5~\tbps{} and 6~\pjbit{} per hop is included
+specifically to defeat the bandwidth hypothesis. Even against that
+baseline, the M1000 photonic option reduces shared-DRAM multicast
+energy by about 99.85\,\%: $N$ unicasts collapse to one logical
+broadcast, and contention disappears under a switched fabric. A
+distance-parameterized link model splits each technology into a
+conversion term and a per-millimeter transmission term so that
+electrical \pjbit{} grows with system size and photonic \pjbit{} stays
+roughly flat. A regression test enforces the crossover.
+
+\item \textbf{Photonic interconnect is conditional, not universal.} On a
+9216-chip Ironwood-class pod, the public Gemma~4 26B mixture-of-experts
+proxy reaches a $42.4\times$ inference latency speedup and a 94.05\,\%
+energy reduction with the full photonic compiler stack. The longer
+long-context Gemini-class proxy reaches $14.5\times$. Training, by
+contrast, reaches only $3.4\times$ and $1.4\times$ respectively, because
+once communication shrinks, the remaining time is dominated by matrix-
+multiply compute. Strong scaling exposes that compute and HBM ceiling;
+weak scaling shows where photonic multicast still pays. The strongest
+case for photonics in our setup is inference and long-context serving,
+not training payoff.
 \end{enumerate}
 
 \section{Contributions}
-\textbf{Simone Surdi.} AccelForge / network model: topology classes
-(ring, mesh, 3-D torus, optical crossbar / switched fabric); the
-\texttt{LogicalClusterMemory} extension; the iterative network-aware
-feedback loop (\texttt{solve\_iteratively}); mapping-signature
-extraction; cluster, TPU-cube, and chiplet-baseline studies;
-technology-catalog constants and sensitivity sweeps.
 
-\textbf{Pranav Sitaraman.} Compiler / superpod analysis:
-distance-parametrized link model; OCS/OPS sensitivity; the four
-named compiler-visible distributed schedules (SPMD collective,
-remote pooled-HBM streaming, replicated cache, photonic multicast
-cache fill); the 9216-chip Ironwood-class stage model
-(prefill / decode / refill / MoE / training / gradient /
-optimizer); strong and weak scaling on Gemma~4 anchors plus
-Gemini-class stress proxies; ablation ladder; integration tests;
-and the report, poster, technical summary, and presentation
+\textbf{Simone Surdi.} Network and topology modeling: ring, mesh, and
+3-D torus baselines along with the optical crossbar and switched-fabric
+abstractions; the logical cluster-memory extension to the accelerator
+architecture; the iterative network-aware feedback loop above the
+mapper; mapping-signature extraction; the cluster, TPU-cube, and
+strong chiplet-baseline studies; the technology catalog and the
+sensitivity sweeps over bandwidth and per-bit energy.
+
+\textbf{Pranav Sitaraman.} Compiler and pod-scale analysis: the
+distance-parameterized link energy model; optical circuit switching
+and optical packet switching sensitivity points; the four named
+distributed-schedule choices (SPMD-style collective, remote pooled-HBM
+streaming, replicated cache, and photonic multicast cache fill); the
+9216-chip Ironwood-class stage model spanning prefill, decode, KV/cache
+refill, mixture-of-experts dispatch, training, gradient synchronization,
+and optimizer state; strong and weak scaling on Gemma~4 anchors plus
+explicitly labeled long-context Gemini-class proxies; the ablation
+ladder across switching modes; the regression suite around the central
+physics; and the report, poster, technical summary, and presentation
 deliverables.
 
-\section{Artifact}
-\textbf{Repository.} \texttt{final-project/workspace/final\_project/}
-in the course repository (extends the AccelForge cluster example).
-\textbf{Reproduction.} \texttt{cd final-project \&\&
-make study \&\& make notebook \&\& make test \&\& make deliverables}
-runs inside the \texttt{accelforge:latest-amd64} Docker image.
-\textbf{Deliverables.} \texttt{paper.pdf} (4-page IEEE conference
-report, grad version), this technical summary
-(\texttt{technical\_summary.pdf}), \texttt{poster.pdf} (a0
-portrait), and \texttt{presentation.pdf} (beamer slides).
-\textbf{Engine.} \texttt{scripts/lightmatter\_interconnects.py}
-holds the technology catalog, topology classes, iterative solver,
-distance physics, strong/weak and OCS/OPS studies, and the
-superpod stage model. \textbf{Notebook.} The main notebook is
-regenerated from the checked-in generator and executed end-to-end
-as part of validation. \textbf{Test suite.}
-\texttt{tests/test\_lightmatter\_project.py} is the canonical
-correctness check and includes regression tests for the
-electrical/photonic distance crossover, the mapping-invariance
-claim, the multicast scaling exponent, the strong/weak modes, and
-the OCS/OPS sensitivity. \textbf{Figures.} The six figures and
-compact assumption/result tables in \texttt{results/presentation/}
-are the canonical final submission package; \texttt{results/} also
-holds the raw CSV artifacts that back every quantitative claim in
-this summary.
+\section{Reproduction and Validation}
+
+The full chain of evidence behind every quantitative claim in this
+sheet is reproducible end-to-end from a single project repository.
+Three command-line entry points cover regeneration of the per-stage
+data tables, end-to-end execution of the supporting analysis notebook,
+and rebuilding of the four submission documents (this technical
+summary, a four-page IEEE conference report, an A0 poster, and an
+accompanying slide deck). A regression suite enforces the central
+physical claims: the electrical-versus-photonic distance crossover,
+the inner-mapping invariance, the multicast scaling rule, the
+strong/weak scaling separation, and the optical-switching sensitivity
+band. Every figure in the submission package is regenerated from the
+checked-in evidence tables; there are no hand-edited plots.
+
+\section{Scope}
+
+The model includes mapper action counts, per-chip memory cost,
+distance-aware link energy, hop count, contention, multicast
+semantics, optical switching, and a stage-level overlap term that
+prevents double-counting compute and network time. It does not
+include packet-level queue dynamics, thermal drift across the
+photonic stack, laser aging, area or cost analysis, model-quality
+effects, or the specific code-generation paths a production
+compiler would take. Those are explicitly listed as follow-on
+work rather than treated as hidden assumptions.
 
 \end{document}
