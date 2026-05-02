@@ -1,11 +1,13 @@
 category,metric,case,value,unit,interpretation
-16-node AccelForge cluster,Best energy reduction,decode_mlp / shared_dram_multicast,71.94908438341182,%,Optical crossbar vs electrical 4x4 mesh.
+16-node AccelForge cluster,Best energy reduction,decode_mlp / shared_dram_multicast,71.94908437225777,%,Optical crossbar vs electrical 4x4 mesh.
 16-node AccelForge cluster,Best latency reduction,decode_mlp / shared_dram_multicast,97.57091747616205,%,Network-aware fixed-point mapping result.
 TPU cube pure network,Best energy reduction,Photonic torus (EVK100) / shared_weight_multicast,99.92659422588832,%,Large traffic-case model vs TPU v5p electrical torus.
-TPU cube AccelForge mapping,Best energy reduction,TPU cube EVK100 photonic torus / kv_attention / shared_dram_multicast,77.45303760086773,%,Includes fixed-point remapping after link-cost feedback.
+TPU cube AccelForge mapping,Best energy reduction,TPU cube EVK100 photonic torus / kv_attention / shared_dram_multicast,77.45303759570524,%,Includes fixed-point remapping after link-cost feedback.
 TPU cube AccelForge mapping,Photonic cases with new mapping signature,photonic variants vs electrical torus,0.0,of 24,Counts final mappings whose compact signature differs.
 Distributed inference mapping,Architectures with changed optimal mapping,prefill_projection / Lightmatter Optical Crossbar / Lightmatter EVK100 -> shared_dram_multicast,5.0,of 16,Topology/link changes can make multicast preferable to node-to-node exchange.
 Compiler/dataflow paradigm,Best changed strategy,kv_attention / EVK100 photonic torus -> Remote pooled-HBM streaming,73.8606645519647,%,"Models XLA/Pallas-visible cache, sharding, and multicast choices."
+Scaling law,Best multicast energy exponent,EVK100 photonic torus,0.002170634053359536,log-log slope,Lower is better when scaling from 64 chips to superpod scale.
 Advanced chiplet comparison,Best energy reduction vs chiplet,EVK100 photonic torus / shared_state_multicast,99.8779667721519,%,"Compares against 3.5 Tbps, 6 pJ/bit advanced packaging."
 Full superpod end-to-end,Best latency speedup,Gemma 4 26B MoE proxy / inference,42.428867954798655,x,9216-chip Ironwood Gemma/Gemini proxy with full photonic compiler stack.
 Full superpod end-to-end,Best energy reduction,Gemma 4 26B MoE proxy / inference,94.05327505347316,%,"End-to-end compute + HBM + network energy, including compiler/dataflow effects."
+Superpod ablation,Largest final-step increment,Gemma 4 26B MoE proxy / inference,1.0665924727576714,x vs previous,"Incremental effect after topology, multicast, remote HBM, and MoE-locality ablations."

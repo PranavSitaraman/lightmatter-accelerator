@@ -1,7 +1,0 @@
-step,experiment,question,answer
-1,16-node AccelForge feedback loop,Does a logical-memory network level change energy and latency?,Yes: optical multicast reduces cluster energy by ~72% and latency by ~98%.
-2,Distance-aware link model,Is pJ/bit constant with scale?,No: electrical/chiplet links grow with distance; photonics is conversion dominated.
-3,TPU cube mapping and multicast,Is the gain just bandwidth?,No: shared-state multicast collapses N unicasts into one broadcast.
-4,Mapping vs distributed schedule,Can the AccelForge mapping stay stable while compiler choices change?,"Yes: 0/24 inner signatures change, but 5/16 distributed choices change."
-5,Strong/weak scaling and OCS/OPS,What improves with larger systems and switching semantics?,Photonic multicast scales flatter; OPS mainly helps fine-grained phases.
-6,9216-chip Gemma/Gemini proxy,Does the stack matter end to end?,Inference improves far more than training because training becomes compute-bound.

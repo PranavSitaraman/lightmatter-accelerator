@@ -4,9 +4,9 @@ This project evaluates **Lightmatter photonic interconnects** as an emerging tec
 
 The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/final-project/workspace/final_project) and includes:
 
-- an executed reproducibility notebook,
+- an executed exploratory notebook,
 - reusable study code and a CLI,
-- raw CSV/Markdown audit artifacts plus a six-figure final submission package,
+- CSV, Markdown, and presentation-ready chart artifacts,
 - a compiler/dataflow strategy model that shows mapping changes beyond constant-factor link substitutions,
 - distance-parametrized electrical/chiplet/photonic link-energy models,
 - strong- and weak-scaling studies plus OCS/OPS optical switching sensitivity,
@@ -19,10 +19,9 @@ The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/fin
 
 ### Submission deliverables
 
-- Self-contained project report (IEEE conference format, based on the course template): [workspace/final_project/paper.tex](/home/pranav/6.5930/final-project/workspace/final_project/paper.tex) -> `paper.pdf`
+- Project report (IEEE conference format): [workspace/final_project/paper.tex](/home/pranav/6.5930/final-project/workspace/final_project/paper.tex) -> `paper.pdf`
 - Technical summary sheet (1 page): [workspace/final_project/technical_summary.tex](/home/pranav/6.5930/final-project/workspace/final_project/technical_summary.tex) -> `technical_summary.pdf`
 - Poster: [workspace/final_project/poster.tex](/home/pranav/6.5930/final-project/workspace/final_project/poster.tex) -> `poster.pdf`
-- Presentation: [workspace/final_project/presentation.tex](/home/pranav/6.5930/final-project/workspace/final_project/presentation.tex) -> `presentation.pdf`
 
 ### Code, data, and figures
 
@@ -31,9 +30,9 @@ The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/fin
 - Notebook generator: [workspace/final_project/scripts/generate_lightmatter_notebook.py](/home/pranav/6.5930/final-project/workspace/final_project/scripts/generate_lightmatter_notebook.py)
 - Architecture: [workspace/final_project/arch/tpu_lightmatter_cluster.yaml](/home/pranav/6.5930/final-project/workspace/final_project/arch/tpu_lightmatter_cluster.yaml)
 - Workload: [workspace/final_project/workload/single_matmul.yaml](/home/pranav/6.5930/final-project/workspace/final_project/workload/single_matmul.yaml)
-- Canonical final submission package: [workspace/final_project/results/presentation](/home/pranav/6.5930/final-project/workspace/final_project/results/presentation)
+- Condensed presentation package: [workspace/final_project/results/presentation](/home/pranav/6.5930/final-project/workspace/final_project/results/presentation)
 
-The main notebook is regenerated from code and fully executed as part of validation. The final report, poster, summary, and deck use the curated six-figure package in `results/presentation`; the parent `results/` directory remains the raw reproducibility trail. The test suite covers the network model, AccelForge smoke paths, generated artifacts, notebook structure, distance physics, strong/weak scaling, OCS/OPS sensitivity, and superpod workflows.
+The main notebook is regenerated from code and fully executed as part of validation. The test suite covers the network model, AccelForge smoke paths, generated artifacts, notebook structure, distance physics, strong/weak scaling, OCS/OPS sensitivity, and superpod workflows.
 
 ## Added Studies
 
@@ -59,4 +58,4 @@ make test
 make validate
 ```
 
-Study, notebook, and test commands run inside the AccelForge Docker image and write outputs under [workspace/final_project/results](/home/pranav/6.5930/final-project/workspace/final_project/results). `make deliverables` builds the report, presentation, poster, and technical summary PDFs from their LaTeX sources and removes LaTeX intermediates. `make inference`, `make training`, and `make superpod` regenerate only the end-to-end phase workflow artifacts without rerunning the slower AccelForge mapping sweeps.
+Study, notebook, and test commands run inside the AccelForge Docker image and write outputs under [workspace/final_project/results](/home/pranav/6.5930/final-project/workspace/final_project/results). `make deliverables` builds the report, poster, and technical summary PDFs from their LaTeX sources and removes LaTeX intermediates. `make inference`, `make training`, and `make superpod` regenerate only the end-to-end phase workflow artifacts without rerunning the slower AccelForge mapping sweeps.

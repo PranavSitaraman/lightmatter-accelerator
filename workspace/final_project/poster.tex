@@ -1,5 +1,10 @@
-\documentclass[a0paper,portrait]{tikzposter}
+\documentclass[portrait,margin=0mm]{tikzposter}
+\geometry{paperwidth=36in,paperheight=48in,margin=0mm}
 
+\makeatletter
+\setlength{\TP@visibletextwidth}{\textwidth-2\TP@innermargin}
+\setlength{\TP@visibletextheight}{\textheight-2\TP@innermargin}
+\makeatother
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
@@ -11,15 +16,20 @@
 \usepackage{array}
 \usepackage{xcolor}
 \usepackage{enumitem}
+\usepackage{relsize}
 
 \graphicspath{{results/presentation/}{results/}}
-\setlist[itemize]{nosep,leftmargin=*}
 
 \definecolor{DeepNavy}{HTML}{0B1F3A}
 \definecolor{Photon}{HTML}{007C89}
 \definecolor{Mist}{HTML}{EEF6F6}
 \definecolor{Ink}{HTML}{1F2937}
-\definecolor{Amber}{HTML}{D97706}
+
+\setlist[itemize]{nosep,leftmargin=*}
+\setlist[enumerate]{nosep,leftmargin=*}
+
+\newcommand{\pjbit}{pJ/bit}
+\newcommand{\tbps}{Tb/s}
 
 \definecolorpalette{posterpalette}{
     \definecolor{colorOne}{named}{DeepNavy}
@@ -34,114 +44,337 @@
 \colorlet{blocktitlefgcolor}{white}
 \colorlet{blockbodybgcolor}{white}
 \colorlet{blockbodyfgcolor}{Ink}
+\colorlet{notebgcolor}{Mist}
+\colorlet{notefgcolor}{Ink}
 \colorlet{backgroundcolor}{white}
 
-\newcommand{\pjbit}{pJ/bit}
-\newcommand{\tbps}{Tb/s}
-\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
-
-\title{\parbox{0.94\linewidth}{\centering Topology-Aware Mapping for Photonic Interconnects \\ in TPU-Class LLM Accelerators}}
+% =====================================================================
+% 1. Project title  +  2. Project group members
+% =====================================================================
+\title{\parbox{0.94\linewidth}{\centering Photonic Interconnects for TPU LLM Workloads}}
 \author{Pranav Sitaraman \quad \textbullet \quad Simone Surdi}
-\institute{MIT 6.5930 Hardware Architectures for Deep Learning \quad \textbullet \quad Project 12: Evaluate a New Technology}
+\institute{MIT 6.5930 / Hardware Architectures for Deep Learning \quad \textbullet \quad Spring 2026 \quad \textbullet \quad Project 12: Evaluate a New Technology}
+\titlegraphic{}
 
 \settitle{
 \centering
+\vbox{\@titlegraphic}\vskip-1ex
 {\bfseries\color{white}\Huge \@title}\vskip0.6ex
-{\color{white}\Large \@author}\vskip0.3ex
-{\color{white}\large \@institute}
+{\color{white}\large \@author}\vskip0.3ex
+{\color{white}\normalsize \@institute}
 }
 
 \begin{document}
+
 \maketitle
 
+\linespread{0.9}
+% =====================================================================
+% Motivation  +  Underlying Principles
+% =====================================================================
 \begin{columns}
-\column{0.47}
-\block{1. Motivation}{\normalsize
-TPU pods succeed not because each chip is faster in isolation but because thousands of chips are wired together with a carefully designed memory and interconnect system. The most recent TPU7x/Ironwood pods publicly expose 9216 chips per pod, 192~GiB of HBM per chip, and 1200~GB/s of bidirectional inter-chip bandwidth per chip. For language model training and inference at this scale, the hard part is moving things---decode caches, expert tokens, gradients, layer-tied weights---rather than computing them.
+\column{0.42}
+\block{Motivation}{\small
+Frontier large language models---open-weight Gemma~4 and the
+proprietary Gemini~3 family---are trained and served on TPU pods
+whose performance is bounded less by raw matrix-multiply
+throughput than by the cost of moving activations, KV-cache
+state, expert tokens, gradients, and shared weights between
+thousands of accelerators. TPU v5p and the 9216-chip Ironwood pod
+(4614 FP8~TFLOP/s per chip, 192~GiB HBM, 7.4~TB/s HBM bandwidth,
+1.2~TB/s bidirectional ICI) are organised around high-radix
+electrical inter-chip interconnect for exactly this reason.
 
 \medskip
-\textbf{Question.} If a future TPU pod were wired with Lightmatter Passage-style photonic interconnect, would we just observe a lower-energy link, or would the optimal memory placement and distributed schedule above the link change as well?
+Co-packaged photonic interconnect---of which Lightmatter's
+Passage family (EVK50, EVK100, L200, L200X, M1000) is a public
+reference---offers lower per-bit energy and, more interestingly,
+distance-insensitive transmission and hardware multicast. The
+question is not just whether links get cheaper; it is whether
+photonics changes how a TPU pod should be \emph{mapped and
+scheduled}, and if so, at which layer.
+
+\medskip
+\textbf{Research question.} Is photonic interconnect a
+constant-factor link substitution, or does it change the optimal
+partitioning, dataflow, tile sizing, and distributed schedule for
+an LLM workload running on a TPU-class cluster?
+
+\medskip
+\textbf{Three insights.} (1) The per-chip mapping is invariant
+under photonics: 0/24 mapping signatures change on the modelled
+TPU cube. (2) Hardware multicast and distance-insensitive
+transport, not raw bandwidth, are decisive: M1000 still beats a
+strong 3.5~\tbps{}/6~\pjbit{} chiplet baseline by 99.85\% on
+shared-state multicast. (3) Photonics is mostly an inference
+accelerator: 42.43$\times$ Gemma~4 26B sparse-MoE inference
+speedup vs.\ 3.37$\times$ training, because once collectives
+shrink training is compute-bound.
 }
 
-\column{0.53}
-\block{2. Underlying Principles}{\normalsize
-\textbf{Four conceptual layers.} We separate the workload (an einsum), the architecture (per-chip memory plus a logical cluster-memory level), the inner mapping picked by the mapper, and the distributed schedule chosen above the mapper (point-to-point exchange, remote pooled-HBM streaming, replicated cache, photonic multicast cache fill).
+\column{0.58}
+\block{Underlying Principles}{\small
+\textbf{Four-layer modelling stack.} The pipeline has four
+explicit layers, only three of which the per-chip mapper sees.
+The first is the \emph{workload} (the matrix-multiply einsum with
+rank sizes per LLM stage). The second is the \emph{architecture}
+(a cluster-scale memory level above per-chip HBM, the node-array
+fanout, the unified buffer, the processing-element array, the
+weight register, and the MAC). The third is the \emph{mapping}
+(the sequence of storage, spatial, temporal, and compute
+directives with concrete tile shapes that the mapper produces---
+the standard mapping formalism: partitioning, dataflow, tile
+sizing). The fourth is the \emph{distributed schedule} that lives
+above the mapper: which tensor a compiler keeps in the cluster
+pool versus per-chip HBM, and which named XLA-style policy
+(sharded collective, remote pooled-HBM streaming, replicated
+cache, photonic multicast cache fill) is selected.
 
 \medskip
-\textbf{Network model.}
-\[
-E_{\text{net}} = B\bigl(e_c + h\,\ell(N)\,e_{tx}\bigr),\quad
-T_{\text{net}} = \frac{B}{BW/C(N)} + h\,t_r + h\,\ell(N)\,t_p + t_s.
-\]
-Electrical and chiplet links pay an energy term that grows with average path distance. Photonic links are conversion-dominated and stay nearly flat. Non-multicast baselines pay every receiver. Photonic multicast pays the unique payload exactly once.
+\textbf{Distance-aware link energy.} A bit transferred over $h$
+hops of average physical link length $\ell(N)$ pays
+$E_{\text{bit}}(N)=e_c+h\,\ell(N)\,e_{tx/\text{mm}}$, where $e_c$
+is conversion overhead and $e_{tx/\text{mm}}$ is per-millimetre
+transmission energy. Electrical links pay most of their cost in
+$e_{tx/\text{mm}}$; photonic links pay it almost entirely in
+$e_c$ with $e_{tx/\text{mm}}\!\approx\!0$.
 
 \medskip
-\textbf{Iterative loop.} The mapper runs, its traffic is priced through the topology, and the resulting energy and latency are folded back into the logical-memory level. The mapper is then rerun until those per-bit numbers stabilize.
+\textbf{Topology cost.}
+$T_{\text{net}}(N) = B/(BW_\ell/C(N)) + h\,t_r + h\,\ell(N)\,t_p + t_s$,
+with contention $C(N)$ equal to $\sqrt{N}$ for a 2-D mesh,
+$\sqrt[3]{N}$ for a 3-D torus, and one for a switched fabric.
+Multicast: a non-multicast technology pays the unicast volume $N$
+times for an $N$-way fanout; a multicast-capable photonic
+technology pays the unique payload once.
+
+\medskip
+\textbf{Iterative feedback into the mapper.} Run the mapper with
+the cluster pool exposed as a memory level; price the resulting
+traffic via the topology cost; fold the per-bit energy and
+latency back into that level; re-run. Converges in $\le 3$
+iterations.
+
+\medskip
+\textbf{End-to-end stage model.}
+$T_{\text{stage}} = \max(T_c, T_{\text{HBM}})
++ (1{-}\alpha)T_{\text{net}}$ across prefill, decode KV
+attention, weight or expert refill, MoE dispatch and combine,
+training forward and backward, gradient synchronization, and
+optimizer traffic.
+}
+\end{columns}
+
+% =====================================================================
+% 5. Evaluation
+% =====================================================================
+\block{5.\ Evaluation}{\small
+\textbf{Held fixed.} Compute, register, on-chip buffer, per-chip
+HBM, and HBM energy and latency are identical across all
+comparisons. Only interconnect technology, topology, and
+distributed schedule vary.
+\quad
+\textbf{Modelled technologies.} Electrical 800G (0.8~\tbps,
+10.0~\pjbit), advanced chiplet (3.5~\tbps, 6.0~\pjbit; included
+specifically to defeat the bandwidth hypothesis), and the
+Lightmatter Passage points: EVK50 (0.8~\tbps, 4.6~\pjbit),
+EVK100 (3.2~\tbps, 1.9--3.2~\pjbit), L200 (16~\tbps, 4.5~\pjbit),
+L200X (32~\tbps, 4.8~\pjbit), and M1000 (57.3~\tbps, 2.3~\pjbit;
+built-in optical circuit switching); plus an
+optical-packet-switching sensitivity at the M1000 bandwidth class.
+\quad
+\textbf{Workloads.} Six GEMM proxies (decode MLP, KV attention,
+prefill projection, long-context prefill, MoE dispatch, training
+weight gradient) drive the per-chip mapper experiments. The
+end-to-end study uses public Gemma~4 26B sparse-MoE and 31B
+dense anchors plus Gemini-class Pro MoE and Deep Think
+long-context stress proxies (parameter counts not public;
+explicitly labelled).
+\quad
+\textbf{Reproducibility.} A single command path rebuilds every
+artifact---figures, CSV outputs, this poster, the report, the
+technical summary, and the regression suite---inside the
+course's container image. The regression suite asserts technology
+constants, the long-distance electrical-vs-photonic crossover,
+the multicast volume semantics, the per-chip mapping invariance,
+the strong/weak modes, and the optical-switching sensitivity.
+\quad
+\textbf{Limitations.} Optical multicast is modelled as one
+logical broadcast (optimistic, explicit); the stage model is
+analytical, not cycle-accurate; the OPS point is a sensitivity
+what-if, not a Lightmatter product claim.
+}
+
+% =====================================================================
+% Results and Analysis of Results
+% =====================================================================
+\begin{columns}
+\column{0.33}
+\block{Distance physics: where the crossover lives}{
+\centering
+\includegraphics[width=\linewidth]{10_distance_physics.png}\\[0.2em]
+{\linespread{0.9}\scriptsize
+Effective \pjbit{} grows nearly linearly for the
+electrical and chiplet tori as cluster size grows, but stays flat
+for the photonic switched fabrics. Below $\sim$10~mm the
+electrical link wins on raw \pjbit{}; near pod-scale path lengths
+it is two orders of magnitude more expensive per bit. This
+crossover is the physical reason photonic interconnect cannot be
+evaluated as a flat constant. \par}
+}
+
+\column{0.33}
+\block{Multicast, not bandwidth, is decisive}{
+\centering
+\includegraphics[width=\linewidth]{02_tpu_mapping_reductions.png}\\[0.2em]
+{\linespread{0.9}\scriptsize TPU-cube energy reduction relative to the electrical
+torus, by communication scenario. Multicast bars (left) cluster
+near 77\%; node-to-DRAM bars (right) are smaller and depend more
+on raw bandwidth. Photonic gain on shared-DRAM multicast reaches
+99.93\% E / 99.61\% L (EVK100) and 99.91\% E / 99.99\% L (M1000)
+versus the TPU v5p-class electrical torus. \par}
+}
+
+\column{0.33}
+\block{Bandwidth hypothesis ruled out}{
+\centering
+\includegraphics[width=\linewidth]{06_chiplet_baseline.png}\\[0.2em]
+{\linespread{0.9}\scriptsize Photonic fabrics versus the strong 3.5~\tbps{},
+6~\pjbit{} chiplet baseline. The chiplet closes most of the
+bandwidth gap on activation exchange and remote-weight refill
+(87--92\%), but on shared-state multicast both EVK100 and M1000
+still beat it by \textbf{99.85\%}. $N$ unicasts collapse to one
+logical broadcast and the contention floor disappears on a
+switched fabric: multicast is the architectural property that
+matters. \par}
 }
 \end{columns}
 
 \begin{columns}
-\column{0.47}
-\block{3. Evaluation Setup}{\normalsize
-\begin{itemize}
-\item \textbf{Held fixed:} compute (MAC, register file, unified buffer) and per-chip HBM energy and latency.
-\item \textbf{Varied:} interconnect technology, topology, multicast support, and the distributed schedule.
-\item \textbf{Baselines:} an electrical TPU-style torus and a deliberately strong 3.5~\tbps{}, 6~\pjbit{} chiplet baseline so the comparison is not against straw electronics.
-\item \textbf{Photonics:} EVK100 (3.2~\tbps{} class, 1.9--3.2~\pjbit{}) and M1000 (57.3~\tbps{} one-way, 2.3~\pjbit{} including laser, multicast-capable optical circuit switching).
-\item \textbf{Workloads:} six representative GEMM proxies (decode MLP, KV attention, prefill projection, long-context prefill, mixture-of-experts dispatch, training weight gradient) plus public Gemma~4 anchors and an explicitly labeled long-context Gemini-class stress proxy.
-\end{itemize}
+\column{0.33}
+\block{Layer 3 invariant; layer 4 moves}{
+\centering
+\includegraphics[width=\linewidth]{04_compiler_strategy_choices.png}\\[0.2em]
+{\linespread{0.9}\scriptsize Energy gain of the best XLA-style schedule per
+(workload, technology) cell relative to the electrical baseline.
+\textbf{0/24} per-chip mapping signatures change under photonics;
+\textbf{5/16} distributed mappings flip from node-to-node to
+shared-DRAM multicast; remote pooled-HBM streaming on EVK100
+removes \textbf{73.86\%} of the compute energy on KV attention. \par}
 }
 
-\column{0.53}
-\block{4. Final Experiment Spine}{\centering
-\includegraphics[width=\linewidth]{01_evidence_chain.png}
+\column{0.33}
+\block{Pod-scale scaling: per-chip cost}{
+\centering
+\includegraphics[width=\linewidth]{05_scaling_laws.png}\\[0.2em]
+{\linespread{0.9}\scriptsize Per-chip shared-state broadcast latency from cube to
+pod scale on a log--log axis. The TPU electrical torus and the
+chiplet torus rise nearly two orders of magnitude per decade of
+chip count; the M1000 switched fabric stays flat. At 9216 chips
+the gap is roughly seven orders of magnitude. \par}
+}
+
+\column{0.33}
+\block{Strong vs.\ weak scaling on Gemma 4}{
+\centering
+\includegraphics[width=\linewidth]{11_strong_weak_scaling.png}\\[0.2em]
+{\linespread{0.9}\scriptsize Per-modelled-work-unit latency on Gemma~4 26B
+sparse-MoE inference under strong (fixed problem on more chips)
+and weak (per-chip work fixed; problem grows with $N$) scaling.
+The full photonic stack maintains a clear advantage at every
+modelled chip count; weak scaling exposes the per-chip cost
+growth on the electrical baseline. \par}
 }
 \end{columns}
 
 \begin{columns}
-\column{0.5}
-\block{5. Results: Distance Physics and Mapping}{\centering
-\includegraphics[width=\linewidth]{02_distance_and_scaling.png}\\[0.4em]
-\includegraphics[width=\linewidth]{03_mapping_and_schedule.png}
+\column{0.33}
+\block{End-to-end: inference vs.\ training}{
+\centering
+\includegraphics[width=\linewidth]{07_superpod_end_to_end_speedups.png}\\[0.2em]
+{\linespread{0.9}\scriptsize 9216-chip Ironwood-pod end-to-end speedup. The
+Gemma~4 26B sparse-MoE inference proxy reaches
+\textbf{42.43$\boldsymbol\times$} latency speedup with the full
+M1000 photonic stack and 94.05\% energy reduction; the larger
+Deep Think proxy reaches 14.50$\times$. Training reaches only
+3.37$\times$ on Gemma~4 MoE and 1.43$\times$ on the larger
+proxy. \par}
 }
 
-\column{0.5}
-\block{6. Results: Multicast and Pod Impact}{\centering
-\includegraphics[width=\linewidth]{04_multicast_and_chiplet.png}\\[0.4em]
-\includegraphics[width=\linewidth]{05_superpod_end_to_end.png}
+\column{0.33}
+\block{Why the asymmetry: stage breakdown}{
+\centering
+\includegraphics[width=\linewidth]{08_superpod_stage_breakdown.png}\\[0.2em]
+{\linespread{0.9}\scriptsize Per-stage latency that \emph{remains} once the full
+M1000 photonic stack has been applied. All inference stages
+(prefill, decode KV attention, weight stream, MoE dispatch)
+collapse to near zero. The single stage that does not is
+training forward/backward compute, which sits inside the
+$\max(T_c,T_{\text{HBM}})$ envelope and has nothing to do with
+the network. \par}
+}
+
+\column{0.33}
+\block{Analysis: where it helps, where it does not}{\small
+Photonics helps most when the workload either fans out to many
+chips or repeatedly crosses a long path: long-context inference,
+sparse-MoE serving, remote pooled-HBM access, and weight or KV
+broadcast. It helps least when the bottleneck is local compute or
+per-chip HBM, when one nearest-neighbour electrical hop already
+serves the workload, or when the per-chip mapping was already
+optimal under the electrical baseline. The per-chip mapping does
+not change under any photonic technology: that is the empirical
+justification for separating the per-chip mapping from the
+cluster-level schedule when reporting any new-technology study.
+The strong end-to-end case for photonic interconnect at pod
+scale is therefore inference and long-context serving rather
+than training payoff.
+\quad
+\textbf{What worked.} The iterative feedback loop converged in
+three iterations or fewer in every case; the topology cost model
+produced the predicted multicast asymmetry; the stage model
+reproduced the inference--training divergence cleanly.
+\quad
+\textbf{What did not.} An attempt to fold the inter-chip network
+into the accelerator architecture as a degenerate memory level
+produced opaque numbers and was abandoned in favour of the
+external network model with explicit feedback into a single
+logical-memory level.
+\quad
+\textbf{Future work.} Direct integration with an XLA-style
+compiler so the schedule choice is searched continuously rather
+than enumerated; a cycle-accurate optical-switch simulator;
+co-design of MoE expert placement under photonic locality; and
+pipeline-parallel and ZeRO-3 training stage models.
 }
 \end{columns}
 
-\begin{columns}
-\column{0.5}
-\block{7. Cluster Validation Heatmap}{\centering
-\includegraphics[width=\linewidth]{07_cluster_workload_heatmap.png}
-}
-\column{0.5}
-\block{8. Switching and Residual Bottlenecks}{\centering
-\includegraphics[width=\linewidth]{06_switching_and_limits.png}
-}
-\end{columns}
-
-\block{9. Analysis of Results}{\normalsize
-\begin{tabularx}{\linewidth}{lYY}
-\toprule
-Finding & Evidence & Interpretation \\
-\midrule
-Network-aware feedback changes system metrics & On a 16-node cluster the photonic crossbar reduces total energy by about 72\,\% and total latency by about 98\,\% on weight-dominated workloads & The logical-memory level is doing real work in the model, not just changing a label. \\
-The local mapping does not move under the photonic swap & On the 64-chip torus, $0$ of $24$ inner mapping signatures differ from the electrical baseline across all photonic variants & Local GEMM dataflow is dominated by per-chip parameters, which we hold fixed. \\
-The distributed schedule does change & $5$ of $16$ workload--architecture combinations switch from point-to-point exchange to shared multicast, and the best alternative schedule recovers up to 73.86\,\% of the original schedule's energy & The benefit lives one layer above the mapper, in compiler-visible territory. \\
-Multicast, not raw bandwidth, is decisive & Even against a deliberately strong 3.5~\tbps{} 6~\pjbit{} chiplet baseline, photonic torus and switched fabrics reduce shared-multicast energy by close to 100\,\% & Topology semantics matter more than per-link bandwidth at pod scale. \\
-Inference benefits much more than training & On a 9216-chip Ironwood-class pod, modeled inference latency improves about $42\times$ for the Gemma~4 MoE proxy while training improves about $3.4\times$ & Once communication shrinks, what remains is matrix-multiply compute. \\
-\bottomrule
-\end{tabularx}
-
-\medskip
-\textbf{What we do not claim.} The model deliberately excludes packet-level queueing, exact production compiler code generation, area and cost analysis, thermal drift, laser aging, and model-quality effects. Each of these is a follow-on study rather than a hidden assumption.
-}
-
-\block{References and Reproducibility}{\normalsize
-Public sources include Google Cloud TPU7x and TPU v5p documentation; the Lightmatter Passage, Passage EVK100, and Passage M1000 EVK product pages; the PyTorch/XLA SPMD user guide; and recent course materials on einsums, mapping, memory hierarchies, and emerging accelerator technologies. The full chain of evidence in this poster is reproducible end-to-end from the project repository: every figure here is regenerated from a tabular evidence trail, and a regression suite locks in the central physics, multicast, mapping-invariance, and switching-mode claims.
+% =====================================================================
+% References
+% =====================================================================
+\block{References}{\small
+[1]~V.~Sze and J.~Emer, MIT 6.5930 lecture notes:
+\emph{Memory \& Metrics}, \emph{Mapping},
+\emph{Mapping/Partitioning}, \emph{Advanced Technologies},
+Spring 2026.
+\quad
+[2]~M.~Gilbert, T.~Andrulis, V.~Sze, J.~S.~Emer, ``Turbo-Charged
+Mapper,'' MIT, 2025.
+\quad
+[3]~T.~Andrulis et al., ``Architecture-Level Modeling of
+Photonic DNN Accelerators,'' ISPASS 2024.
+\quad
+[4]~Lightmatter, Passage product family / EVK100 / M1000 EVK /
+L200 product pages and SC25 \& ISES 2025 talks
+(\texttt{lightmatter.co}).
+\quad
+[5]~Google Cloud, ``TPU v5p,'' ``Cloud TPU7x'' (Apr.~2026), and
+the Ironwood blog; P.~Kanwar, ``TPU Rack Scale Systems,'' Hot
+Chips 2025 Tutorial.
+\quad
+[6]~PyTorch/XLA, ``SPMD user guide.''
+\quad
+[7]~Google, ``Gemma 4 open-model release,'' 2026.
 }
 
 \end{document}
