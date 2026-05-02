@@ -19,10 +19,9 @@ The final deliverable lives in [workspace/final_project](/home/pranav/6.5930/fin
 
 ### Submission deliverables
 
-- Self-contained project report (IEEE conference format, based on the course template): [workspace/final_project/paper.tex](/home/pranav/6.5930/final-project/workspace/final_project/paper.tex) -> `paper.pdf`
+- Project report (IEEE conference format): [workspace/final_project/paper.tex](/home/pranav/6.5930/final-project/workspace/final_project/paper.tex) -> `paper.pdf`
 - Technical summary sheet (1 page): [workspace/final_project/technical_summary.tex](/home/pranav/6.5930/final-project/workspace/final_project/technical_summary.tex) -> `technical_summary.pdf`
 - Poster: [workspace/final_project/poster.tex](/home/pranav/6.5930/final-project/workspace/final_project/poster.tex) -> `poster.pdf`
-- Presentation: [workspace/final_project/presentation.tex](/home/pranav/6.5930/final-project/workspace/final_project/presentation.tex) -> `presentation.pdf`
 
 ### Code, data, and figures
 
@@ -59,4 +58,4 @@ make test
 make validate
 ```
 
-Study, notebook, and test commands run inside the AccelForge Docker image and write outputs under [workspace/final_project/results](/home/pranav/6.5930/final-project/workspace/final_project/results). `make deliverables` builds the report, presentation, poster, and technical summary PDFs from their LaTeX sources and removes LaTeX intermediates. `make inference`, `make training`, and `make superpod` regenerate only the end-to-end phase workflow artifacts without rerunning the slower AccelForge mapping sweeps.
+Study, notebook, and test commands run inside the AccelForge Docker image and write outputs under [workspace/final_project/results](/home/pranav/6.5930/final-project/workspace/final_project/results). `make deliverables` builds the report, poster, and technical summary PDFs from their LaTeX sources and removes LaTeX intermediates. `make inference`, `make training`, and `make superpod` regenerate only the end-to-end phase workflow artifacts without rerunning the slower AccelForge mapping sweeps.

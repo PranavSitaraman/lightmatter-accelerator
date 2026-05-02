@@ -5,7 +5,7 @@ HOST_GID := $(shell id -g)
 
 run-in-docker = docker run --rm --user "$(HOST_UID):$(HOST_GID)" -v "$(CURDIR):/home/workspace" -w $(PROJECT_DIR) $(DOCKER_IMAGE) bash -lc $(1)
 
-.PHONY: all study notebook test superpod inference training validate deliverables report presentation poster technical-summary clean-results clean-latex
+.PHONY: all study notebook test superpod inference training validate deliverables report poster technical-summary clean-results clean-latex
 
 # Run tests, generate study outputs, execute the notebook, and build PDFs.
 all: test study notebook deliverables
@@ -38,17 +38,13 @@ training:
 validate: test study deliverables
 
 # Build all submission-facing PDFs.
-deliverables: report presentation poster technical-summary clean-latex
+deliverables: report poster technical-summary clean-latex
 
 # Compile the IEEE report twice so references and citations settle.
 report:
 	cd workspace/final_project && pdflatex -interaction=nonstopmode paper.tex && pdflatex -interaction=nonstopmode paper.tex
 
-# Compile the self-contained technical deck.
-presentation:
-	cd workspace/final_project && pdflatex -interaction=nonstopmode presentation.tex && pdflatex -interaction=nonstopmode presentation.tex
-
-# Compile the poster required for the project session.
+# Compile the poster.
 poster:
 	cd workspace/final_project && pdflatex -interaction=nonstopmode poster.tex
 
